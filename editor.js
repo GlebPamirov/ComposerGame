@@ -350,34 +350,35 @@ class PianoRoll {
 	}
 
 	exportMIDI() {
-		// Пробуем найти библиотеку в разных местах (window или глобально)
-		
-		const midiLib = window.MidiWriter || window['midi-writer-js'] || (typeof MidiWriter !== 'undefined' ? MidiWriter : null);
-    
-		if (!midiLib) {
-			console.log("Доступные объекты в window:", Object.keys(window).filter(k => k.toLowerCase().includes('midi')));
-			alert("Ошибка: библиотека MIDI не найдена. Попробуйте нажать Ctrl+F5.");
-			return;
-		}
-
-		const tracks = this.tracks.map(t => {
-			// Используем найденную библиотеку
-			const track = new midiLib.Track(); 
-			track.addTrackName(INSTRUMENT_TYPES[t.type].name);
-			track.setTempo(120);
-			
-			this.notes.filter(n => n.trackId === t.id).forEach(n => {
-				track.addEvent(new midiLib.NoteEvent({
-					pitch: [Tone.Frequency(n.pitch, "midi").toNote()],
-					duration: 'T' + (n.duration * 32), 
-					startTick: n.start * 32
-				}));
-			});
-			return track;
-		});
-
-		const write = new midiLib.Writer(tracks);
-		this.downloadFile(write.buildFile(), 'project.mid', 'audio/midi');
+	    // Пробуем все известные варианты имен, под которыми библиотека регистрируется в браузере
+	    const midiLib = window.MidiWriter || window.MidiWriterJS || window['midi-writer-js'];
+	    
+	    if (!midiLib) {
+	        // Если не нашли, выведем в консоль все ключи window, чтобы понять, как она назвалась
+	        console.error("MidiWriter не найден. Список доступных объектов в window:", Object.keys(window));
+	        alert("Библиотека MIDI не инициализирована. Попробуйте обновить страницу.");
+	        return;
+	    }
+	
+	    // ВАЖНО: Если библиотека нашлась, работаем через midiLib
+	    const tracks = this.tracks.map(t => {
+	        const track = new midiLib.Track(); // Используем алиас
+	        track.addTrackName(INSTRUMENT_TYPES[t.type].name);
+	        track.setTempo(120);
+	        
+	        const trackNotes = this.notes.filter(n => n.trackId === t.id);
+	        trackNotes.forEach(n => {
+	            track.addEvent(new midiLib.NoteEvent({
+	                pitch: [Tone.Frequency(n.pitch, \"midi\").toNote()],
+	                duration: 'T' + (n.duration * 32), 
+	                startTick: n.start * 32
+	            }));
+	        });
+	        return track;
+	    });
+	
+	    const write = new midiLib.Writer(tracks);
+	    this.downloadFile(write.buildFile(), 'project.mid', 'audio/midi');
 	}
 
 	downloadFile(content, fileName, contentType) {
