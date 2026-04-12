@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>DAW Constructor Core</title>
+    <link rel="stylesheet" href="style.css">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script src="https://unpkg.com/midi-writer-js@2.1.4/browser/index.js"></script>
+    
+    <script src="editor.js" defer></script>
+</head>
+<body>
+    <div id="daw-wrapper">
+        <header id="toolbar">
+            <div class="group">
+                <button id="btn-play">▶</button>
+                <button id="btn-stop">■</button>
+            </div>
+            <div class="group durations">
+                <button class="dur-btn" data-dur="1">1/1</button>
+                <button class="dur-btn" data-dur="0.5">1/2</button>
+                <button class="dur-btn active" data-dur="0.25">1/4</button>
+                <button class="dur-btn" data-dur="0.125">1/8</button>
+                <button class="dur-btn" data-dur="0.0625">1/16</button>
+            </div>
+			<div class="group">
+				<label for="select-time-sig" style="font-size: 12px; margin-right: 5px;">Размер:</label>
+				<select id="select-time-sig" style="background: #444; color: white; border: 1px solid #555;">
+					<option value="4/4">4/4</option>
+					<option value="3/4">3/4</option>
+				</select>
+			</div>
+			
+			
+            <div class="info">BPM: 120 | Range: C3 - C6</div>
+			
+			<div class="group export-group">
+				<button id="btn-save-midi" title="Экспорт в MIDI">💾 MIDI</button>
+				<button id="btn-save-xml" title="Экспорт в MusicXML">🎼 XML</button>
+			</div>
+			
+			
+			
+        </header>
+		<div id="daw-layout" style="display: flex; flex-direction: row; height: 100%;">
+			<aside id="sidebar" style="width: 150px; background: #2d2d2d; border-right: 1px solid #111; display: flex; flex-direction: column;">
+				<button id="btn-add-track" style="margin: 10px; padding: 5px;">+ Добавить дорожку</button>
+				<div id="tracks-list"></div>
+			</aside>
+			<div id="editor-container" style="flex: 1; overflow: auto;"></div>
+		</div> 
+		
+
+
+		
+        <main id="editor-container">
+            </main>
+    </div>
+	
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.2.4/pixi.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/midi-writer-js/browser/index.js"></script>
+    <script src="editor.js"></script>
+	
+</body>
+</html>
