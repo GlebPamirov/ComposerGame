@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Amadeus DAW</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+</head>
+<body>
+
+    <div id="app-container">
+	<header id="toolbar">
+		<div class="toolbar-center-container">
+			<div class="toolbar-left-1">
+				<div class="toolbar-group" id="group-history">
+					<button id="btn-undo">↶</button>
+					<button id="btn-redo">↷</button>
+				</div>
+			</div>
+			<div class="toolbar-left-2">
+				<div class="toolbar-group" id="group-durations">
+					<button class="dur-btn" data-dur="1">1/1</button>
+					<button class="dur-btn" data-dur="0.5">1/2</button>
+					<button class="dur-btn active" data-dur="0.25">1/4</button>
+					<button class="dur-btn" data-dur="0.125">1/8</button>
+					<button class="dur-btn" data-dur="0.0625">1/16</button>
+				</div>
+			</div>
+			
+			<button id="btn-velocity-mode" class="toolbar-btn" title="Режим редактирования Velocity">🔊 Velocity</button>
+			<button id="btn-note-labels" class="toolbar-btn" title="Подпись нот">До / C</button>
+
+			<div class="toolbar-middle">
+				<div class="toolbar-group" id="group-transport">
+					<button id="btn-to-start">|<</button>
+					<button id="btn-record">●</button>
+					<button id="btn-play" class="transport-main">▶</button>
+					<button id="btn-stop">■</button>
+					<button id="btn-step-next">></button>
+				</div>
+			</div>
+
+			<div class="toolbar-right">
+				<div class="toolbar-group" id="group-settings">
+					<div class="input-wrapper">
+						<label>BPM</label>
+						<input type="number" id="input-bpm" value="120">
+					</div>
+					<select id="select-time-sig">
+						<option value="4/4">4/4</option>
+						<option value="3/4">3/4</option>
+						<option value="2/4">2/4</option>
+						<option value="5/4">5/4</option>
+					</select>
+					<button id="btn-metronome">🕒</button>
+					<button id="btn-export-xml" title="Экспорт в MusicXML">Export</button>
+					<input type="file" id="input-import-xml" accept=".xml,.musicxml" style="display: none;">
+					<input type="text" id="track-title-input" value="Без автора и Без названия" placeholder="Название трека" style="background: #333; color: #fff; border: 1px solid #555; border-radius: 3px; padding: 3px 8px; font-size: 11px; width: 140px; text-align: center; margin: 0 5px;" />
+					<button id="btn-import-xml" title="Импорт в MusicXML">Import</button>
+					
+					<!-- КНОПКИ АВТОРИЗАЦИИ И СТУДИИ -->
+					<button id="authModalBtn" class="toolbar-btn btn-auth">Авторизация</button>
+					<button id="btn-studio" class="toolbar-btn" style="display: none; background: #27ae60; color: white;">STUDIO</button>
+				</div>
+			</div>
+		</div>
+	</header>
+
+        <main id="workspace">
+            <aside id="instruments-panel">
+				<div id="instruments-scroll-area">
+					<div id="instruments-list">
+						<div class="inst-square active" data-type="piano">P</div>
+					</div>
+					<button id="add-inst-btn" class="add-btn" title="Добавить инструмент">+</button>
+				</div>
+            </aside>
+
+            <div id="editor-container"></div>
+
+            <aside id="theory-panel">
+                <div class="chord-circle active" data-chord="single">1</div>
+				<div class="chord-circle" data-chord="maj">Maj</div>
+				<div class="chord-circle" data-chord="min">Min</div>
+				<div class="chord-circle" data-chord="maj7">Maj7</div>
+				<div class="chord-circle" data-chord="min7">Min7</div>
+				<div class="chord-circle" data-chord="dom7">7th</div>
+				<div class="chord-circle" data-chord="maj9">9th</div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- Модальное окно авторизации -->
+    <div id="authModal" class="modal">
+        <div class="modal-content">
+            <h3>Вход в систему</h3>
+            <input type="text" id="loginName" placeholder="Имя пользователя">
+            <input type="password" id="loginPassword" placeholder="Пароль">
+            <button id="btn-submit-login">Войти</button>
+            <button id="btn-submit-logout" style="background:#e74c3c; color:white;">Выйти из аккаунта</button>
+            <button id="btn-close-modal">Отмена</button>
+        </div>
+    </div>
+
+    <!-- Модальное окно STUDIO -->
+	<div id="studioModal" class="modal">
+		<div class="modal-content studio-modal-content">
+			<div class="modal-header">
+				<h2>Режим обучения и Студия</h2>
+				<button id="btn-close-studio-modal" class="btn-close">&times;</button>
+			</div>
+
+			<div class="studio-grid">
+				<!-- Колонку 1: Задания и работы -->
+				<div class="studio-section">
+					<h3>Задания и работы</h3>
+					
+					<div class="form-group">
+						<label>Выбрать задание:</label>
+						<div class="inline-controls">
+							<select id="select-lessons-list" class="styled-select"><option>Загрузка...</option></select>
+							<button id="btn-load-lesson" class="primary-btn">Загрузить</button>
+						</div>
+					</div>
+
+					<div class="form-group">
+						<label>Мои сохраненные работы:</label>
+						<div class="inline-controls">
+							<select id="select-user-projects-list" class="styled-select"><option>Загрузка...</option></select>
+							<button id="btn-load-user-project" class="primary-btn">Загрузить</button>
+						</div>
+					</div>
+
+					<hr class="divider">
+
+					<h3>Сохранить текущую работу</h3>
+					<div class="form-group">
+						<input type="text" id="studio-project-title" placeholder="Название работы..." class="styled-input" />
+					</div>
+					<div class="form-group">
+						<textarea id="studio-project-comment" placeholder="Комментарий к работе..." class="styled-textarea"></textarea>
+					</div>
+					<button id="btn-save-studio-project" class="success-btn full-width">Сохранить</button>
+				</div>
+
+				<!-- Колонку 2: Упражнения и Игры -->
+				<div class="studio-section">
+					<h3>Упражнения</h3>
+					<div class="buttons-stack">
+						<button class="exercise-btn action-btn" data-type="dictation">🎼 Музыкальный диктант</button>
+						<button class="exercise-btn action-btn" data-type="harmonization">🎹 Гармонизация</button>
+						<button class="exercise-btn action-btn" data-type="rhythm">🥁 Ритмический рисунок</button>
+					</div>
+
+					<h3 style="margin-top: 18px;">Игры</h3>
+					<div class="buttons-stack">
+						<button class="game-btn action-btn" data-type="fix_errors">🔧 Исправить ошибки</button>
+						<button class="game-btn action-btn" data-type="remove_extra">❌ Убрать лишнее</button>
+					</div>
+				</div>
+
+				<!-- Колонку 3: Прогресс и Достижения -->
+				<div class="studio-section">
+					<h3>Мой прогресс</h3>
+					<div id="progress-status-container" class="info-card-box">
+						Загрузка данных...
+					</div>
+
+					<h3 style="margin-top: 18px;">Достижения</h3>
+					<div id="achievements-container" class="info-card-box">
+						Загрузка наград...
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- МОДАЛЬНОЕ ОКНО УЧИТЕЛЯ -->
+	<div id="teacherModal" class="modal">
+		<div class="modal-content studio-modal-content teacher-modal">
+			<div class="modal-header">
+				<h2>Панель Учителя</h2>
+				<button id="btn-close-teacher-modal" class="btn-close">&times;</button>
+			</div>
+
+			<div class="studio-grid teacher-grid">
+				<!-- БЛОК 1: Создание заданий -->
+				<div class="studio-section">
+					<h3>1. Создать задание</h3>
+					<div class="form-group">
+						<label>Название урока / задания:</label>
+						<input type="text" id="teacher-task-title" class="styled-input" placeholder="Например: Урок 5. Аккорды" />
+					</div>
+					<!-- Поле описания -->
+					<textarea id="teacher-task-description" class="styled-input" placeholder="Описание задания для учеников..."></textarea>
+
+					<!-- Галочка активности -->
+					<label class="checkbox-label">
+						<input type="checkbox" id="teacher-task-active" checked>
+						Отображать задание ученикам
+					</label>
+					
+					<p class="help-text">Составляет нотную партитуру в редакторе на фоне и нажимает кнопку ниже для публикации ученикам.</p>
+					<button id="btn-save-new-task" class="success-btn full-width">Опубликовать задание</button>
+				</div>
+
+				<!-- БЛОК 2: Таблица и проверка работ -->
+				<div class="studio-section wide-section">
+					<h3>2. Проверка работ учеников</h3>
+					
+					<div class="teacher-work-split">
+						<!-- Список работ -->
+						<div id="teacher-students-list" class="info-card-box scroll-box">
+							Загрузка...
+						</div>
+
+						<!-- Панель оценки -->
+						<div id="review-panel" class="review-panel-box" style="display: none;">
+							<h4 id="review-student-name">Ученик</h4>
+							
+							<button id="btn-load-student-file" class="primary-btn full-width" style="margin-bottom:8px;">
+								👁 Открыть ноты в редакторе
+							</button>
+
+							<div class="form-group">
+								<label>Комментарий ученика:</label>
+								<textarea id="review-user-comment" class="styled-textarea" readonly></textarea>
+							</div>
+
+							<div class="form-group">
+								<label>Оценка (баллы):</label>
+								<input type="number" id="review-points" class="styled-input" placeholder="100" />
+							</div>
+
+							<div class="form-group">
+								<label>Выдать награду:</label>
+								<select id="review-reward-select" class="styled-select">
+									<option value="">-- Без награды --</option>
+									<option value="badge_first">🎵 Первый шаг</option>
+									<option value="badge_master">🎼 Знаток</option>
+									<option value="badge_maestro">👑 Маэстро</option>
+								</select>
+							</div>
+
+							<div class="form-group">
+								<label>Комментарий учителя:</label>
+								<textarea id="review-teacher-comment" class="styled-textarea" placeholder="Отличная работа!"></textarea>
+							</div>
+
+							<button id="btn-save-review" class="success-btn full-width">Сохранить оценку</button>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+    <!-- Подключение скриптов -->
+	<script src="import_export_musicxml.js"></script>
+	
+    <script src="user.js"></script>
+	<script src="teacher.js"></script>
+    
+	<script src="keyboard_manager.js"></script>
+	<script src="harmony.js"></script>
+	<script src="analysis.js"></script>
+	<script src="chords.js"></script>
+    <script src="editor.js"></script>
+</body>
+</html>

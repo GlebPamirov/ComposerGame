@@ -1,0 +1,1130 @@
+:root {
+    --bg-main: #1A1A1A;
+    --bg-toolbar: #2D2D2D;
+    --bg-panel: rgba(20, 20, 20, 0.25); /* 0.25 — это 25% видимости фона */
+    --accent-blue: #4A90E2;
+    --border-color: #111111;
+    --text-color: #CCCCCC;
+    --text-bright: #FFFFFF;
+    --font-main: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background-color: var(--bg-main);
+    color: var(--text-color);
+    font-family: var(--font-main);
+    overflow: hidden;
+}
+
+#app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* --- ЗОНА 1: ТУЛБАР --- */
+#toolbar {
+    height: 50px;
+    background: #2D2D2D;
+    border-bottom: 1px solid #111;
+    display: flex;
+    padding: 0 15px;
+}
+
+.toolbar-left-1.toolbar-left-2., .toolbar-middle, .toolbar-right {
+    flex: 1;
+    display: flex;
+    align-items: center;
+}
+
+.toolbar-center-container {
+    display: flex;
+    width: 100%;
+    align-items: center;
+	justify-content: center;
+}
+
+
+.toolbar-group {
+    display: flex;
+    align-items: center;
+    background: #383838;
+    border: 1px solid #1a1a1a;
+    border-radius: 4px;
+    padding: 2px;
+    gap: 1px;
+    margin: 0 5px;
+}
+
+#toolbar button {
+    background: #444;
+    border: 1px solid #222;
+    color: #ccc;
+    height: 30px;
+    padding: 0 10px;
+    cursor: pointer;
+}
+
+#btn-metronome {
+    width: 30px;
+    height: 30px;
+    margin-left: 7px;
+    padding: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+}
+
+#toolbar button:hover { background: #555; }
+#toolbar button.active { background: #4A90E2; color: white; }
+
+#btn-play.active { background: #27AE60 !important; }
+#btn-record { color: #a33; }
+#btn-record.active { background: #c0392b !important; color: white; }
+
+.input-wrapper { display: flex; flex-direction: column; align-items: center; padding: 0 5px; }
+.input-wrapper label { font-size: 8px; color: #777; }
+.input-wrapper input { background: transparent; border: none; color: #4A90E2; width: 40px; text-align: center; font-weight: bold; }
+#select-time-sig { background: #444; color: white; border: none; font-size: 12px; }
+
+/* Базовый стиль кнопки переключения подписей нот*/
+#btn-note-labels {
+    font-weight: 600;
+    transition: all 0.2s ease;
+}
+
+/* Режим 1: Латиница (Синий акцент) */
+#btn-note-labels.mode-latin {
+    background: #4A90E2 !important;
+    color: #FFFFFF !important;
+    border-color: #357ABD !important;
+}
+
+/* Режим 2: Русский (Фиолетовый/Изумрудный акцент для отличия) */
+#btn-note-labels.mode-ru {
+    background: #9B59B6 !important;
+    color: #FFFFFF !important;
+    border-color: #8E44AD !important;
+}
+
+/* Всплывающая подсказка при наведении на ноту */
+.note-hover-tooltip {
+    position: fixed;
+    z-index: 9999;
+    padding: 5px 9px;
+    background: rgba(20, 24, 30, 0.92);
+    color: #ffffff;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 5px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    pointer-events: none; /* Не мешает кликам мыши */
+    display: none;
+    white-space: nowrap;
+    backdrop-filter: blur(4px);
+    transition: opacity 0.15s ease;
+}
+
+
+
+
+
+/* --- РАБОЧЕЕ ПРОСТРАНСТВО --- */
+#workspace {
+    flex: 1;
+    position: relative;
+    display: flex;
+    overflow: hidden;
+	height: calc(100vh - 50px); /* Занимает всю доступную высоту под тулбаром */
+}
+
+#editor-container {
+    flex: 1;
+    overflow: auto;
+    position: relative;
+    /* 1. Заменяем margin-left/right на padding-left/right */
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 240px; /* Ширина левой панели: сетка стартует строго отсюда */
+    padding-right: 80px;  /* Ширина правой панели */
+
+    /* 2. Привязываем сетку к контенту (после padding), но разрешаем ей прорисовываться под панелями */
+    background-origin: content-box; /* Точка (0,0) фона теперь начинается ПОСЛЕ padding 240px */
+    background-clip: padding-box;  /* Разрешает фону прорисовываться в зоне padding при скролле */
+    background-attachment: local;   /* Фон скроллится вместе с содержимым */
+
+    background-color: #232323;
+    
+    /* Использование переменной --scale-zebra для динамической подсветки входящих интервалов */
+    background-image: 
+        linear-gradient(to right, #111 2px, transparent 2px),
+        linear-gradient(to right, #222 1px, transparent 1px),
+        linear-gradient(to right, #2a2a2a 1px, transparent 1px),
+        linear-gradient(to bottom, #111 1px, transparent 1px),
+        var(--scale-zebra, linear-gradient(to bottom, 
+            #333 0, #333 calc(100% / 12 * 1),                    /* B */
+            #1a1a1a calc(100% / 12 * 1), #1a1a1a calc(100% / 12 * 2),  /* A# */
+            #333 calc(100% / 12 * 2), #333 calc(100% / 12 * 3),        /* A */
+            #1a1a1a calc(100% / 12 * 3), #1a1a1a calc(100% / 12 * 4),  /* G# */
+            #333 calc(100% / 12 * 4), #333 calc(100% / 12 * 5),        /* G */
+            #1a1a1a calc(100% / 12 * 5), #1a1a1a calc(100% / 12 * 6),  /* F# */
+            #333 calc(100% / 12 * 6), #333 calc(100% / 12 * 7),        /* F */
+            #333 calc(100% / 12 * 7), #333 calc(100% / 12 * 8),        /* E */
+            #1a1a1a calc(100% / 12 * 8), #1a1a1a calc(100% / 12 * 9),  /* D# */
+            #333 calc(100% / 12 * 9), #333 calc(100% / 12 * 10),       /* D */
+            #1a1a1a calc(100% / 12 * 10), #1a1a1a calc(100% / 12 * 11),/* C# */
+            #333 calc(100% / 12 * 11), #333 100%                       /* C */
+        ));
+
+    background-size: 
+        160px 100%, 
+        40px 100%,  
+        10px 100%,  
+        100% 20px,  
+        100% 240px; 
+    
+    min-width: 0;
+    height: 100%;
+}
+
+/* Настройка стилей полосы прокрутки (невидимый/аккуратный лифт) */
+#editor-container::-webkit-scrollbar { 
+    width: 8px; 
+    height: 8px; 
+}
+#editor-container::-webkit-scrollbar-track { 
+    background: rgba(0, 0, 0, 0.2); 
+}
+#editor-container::-webkit-scrollbar-thumb { 
+    background: #3a3a3a; 
+    border-radius: 4px;
+}
+#editor-container::-webkit-scrollbar-thumb:hover { 
+    background: #4a90e2; 
+}
+
+/* --- БОКОВЫЕ ПАНЕЛИ --- */
+#instruments-panel {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 240px; /* Было 60px */
+    background: var(--bg-panel);
+    backdrop-filter: blur(5px); 
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 0;
+    z-index: 100; 
+    pointer-events: auto;
+    border-right: 1px solid var(--border-color);
+}
+
+
+#theory-panel {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 60px;
+    background: var(--bg-panel);
+    backdrop-filter: blur(5px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 0;
+	
+	/* ИСПРАВЛЕНИЕ: поднимаем панель над холстом PixiJS и разрешаем клики */
+    z-index: 100; 
+    pointer-events: auto;
+    
+    border-right: 1px solid var(--border-color);
+}
+
+#theory-panel {
+    right: 0;
+    left: auto;
+    width: 80px;
+    border-right: none;
+    border-left: 1px solid var(--border-color);
+}
+
+.inst-square {
+    width: 40px;
+    height: 40px;
+    background: #3A3A3A;
+    border: 1px solid #555;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-weight: bold;
+    color: var(--accent-blue);
+    transition: all 0.2s;
+}
+
+.inst-square.active {
+    border-color: var(--accent-blue);
+    box-shadow: inset 0 0 8px rgba(74, 144, 226, 0.3);
+}
+
+.chord-circle {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: #333;
+    border: 1px solid #666;
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    cursor: pointer;
+    text-align: center;
+    transition: transform 0.1s;
+	
+	z-index: 10;          /* Поднимает кнопку над соседними блоками */
+    pointer-events: auto; /* Принудительно разрешает клики */
+}
+
+.chord-circle.active {
+    background: var(--accent-blue);
+    border-color: #FFFFFF;
+    box-shadow: 0 0 10px rgba(74, 144, 226, 0.6);
+}
+
+
+#scale-selector {
+    background: #222;
+    color: white;
+    border: 1px solid #444;
+    font-size: 10px;
+    width: 70px;
+    margin-top: 10px;
+}
+
+
+/* Левая панель и список инструментов */
+#instruments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 220px;
+    
+    box-sizing: border-box;
+
+    /* 1. Включаем умную прокрутку */
+    flex: 1;                /* Занимает всё доступное пространство между верхом и блоком гармонии */
+    overflow-y: auto;       /* Появляется вертикальный скролл при переполнении */
+    overflow-x: hidden;     /* Скрываем случайный горизонтальный скролл */
+}
+
+/* Аккуратный тонкий скроллбар для списка инструментов */
+#instruments-list::-webkit-scrollbar {
+    width: 4px;
+}
+#instruments-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+#instruments-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+#instruments-list::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-blue);
+}
+
+/* Кнопка добавления нового инструмента */
+#add-inst-btn {
+    align-self: center;         /* Центрируем кнопку по горизонтали */
+    width: 36px;
+    height: 36px;
+    min-height: 36px;           /* Чтобы флекс не сжимал её по высоте */
+    border-radius: 50%;         /* Делаем круглой */
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px;
+    color: #fff;
+    font-size: 20px;
+    cursor: pointer;
+    margin-top: 4px;            /* Небольшой отступ от последней карточки */
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#add-inst-btn:hover {
+    background: var(--accent-blue, #007acc);
+    border-color: transparent;
+    transform: scale(1.08);
+}
+
+#instruments-scroll-area {
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Центрирует элементы (и кнопку) по горизонтали */
+    padding: 8px;
+    box-sizing: border-box;
+}
+
+/* Прямоугольная карточка инструмента */
+.inst-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #2b2b2b;
+    border: 1px solid #3c3c3c;
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: #fff;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.inst-item:hover {
+    background: #353535;
+}
+
+.inst-item.active {
+    background: #3b4856;
+    border-color: #4A90E2;
+}
+
+.inst-item.dragging {
+    opacity: 0.4;
+    border: 1px dashed #4A90E2;
+}
+
+/* Элементы внутри карточки */
+.inst-drag-handle {
+    cursor: grab;
+    color: #666;
+    margin-right: 8px;
+    font-size: 14px;
+}
+
+.inst-name {
+    flex-grow: 1;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+.inst-name:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.inst-name-input {
+    flex-grow: 1;
+    background: #1e1e1e;
+    color: #fff;
+    border: 1px solid #4A90E2;
+    border-radius: 3px;
+    padding: 2px 4px;
+    font-size: 13px;
+    width: 100%;
+}
+
+/* Кнопка выбора цвета */
+.inst-color-picker {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    background: transparent;
+    padding: 0;
+    margin-left: 8px;
+}
+
+.inst-color-picker::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.inst-color-picker::-webkit-color-swatch {
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    border-radius: 50%;
+}
+
+/* Кнопка управления громкостью и Mute */
+.inst-vol-btn {
+    background: transparent;
+    border: none;
+    outline: none;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 5px;
+    margin: 0 4px;
+    border-radius: 4px;
+    transition: background 0.15s ease, transform 0.1s ease;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.inst-vol-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    transform: scale(1.1);
+}
+
+/* Визуальный стиль для заглушенного трека (Mute) - кнопка становится серой, я отключил это свойство
+.inst-vol-btn.muted {
+    opacity: 0.5;
+    filter: grayscale(1);
+}
+*/
+.inst-item.muted-track {
+    opacity: 0.4; /* панель инструмента становится серой*/
+}
+
+/* Дополнительные стили для пунктов меню инструмента */
+.piano-roll-context-menu .menu-item.danger {
+    color: #e74c3c;
+}
+
+.piano-roll-context-menu .menu-item.danger:hover {
+    background: #c0392b;
+    color: #ffffff;
+}
+
+.piano-roll-context-menu .menu-item-icon {
+    margin-right: 8px;
+    font-size: 14px;
+}
+
+/* ==========================================================================
+   ИЗОЛИРОВАННЫЕ СТИЛИ БЛОКА ГАРМОНИИ (ЛЕВАЯ ПАНЕЛЬ И СЕТКА)
+   ========================================================================== */
+
+/* 1. Увеличенный блок "Гармония" в левой панели инструментов */
+.harmony-side-box {
+    margin-top: auto;
+    margin-bottom: 12px;
+    width: 220px;
+    background: #25282E;
+    border: 1px solid #3A3D45;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    box-sizing: border-box;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.harmony-side-box.active {
+    border-color: #2ECC71;
+    box-shadow: 0 0 10px rgba(46, 204, 113, 0.25);
+}
+
+/* Кнопка переключения зебры в ряду выбора лада */
+.harmony-side-box .scale-toggle-btn {
+    width: 32px;
+    min-width: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.harmony-side-box .scale-toggle-btn.active {
+    background: #2ECC71;
+    border-color: #2ECC71;
+    color: #FFFFFF;
+}
+
+.harmony-side-box .harmony-selects-inline {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+    width: 100%;
+}
+
+.harmony-side-box .harmony-selects-inline select {
+    flex: 1;
+    min-width: 0; /* Чтобы текст в выпадающих списках ужимался без вылезания */
+}
+
+.harmony-box-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #343842;
+    border: 1px solid var(--accent-blue);
+    border-radius: 4px;
+    padding: 8px 10px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--text-bright);
+    user-select: none;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.harmony-box-header:hover {
+    background: var(--accent-blue);
+}
+
+.harmony-box-header.active {
+    background: #27AE60;
+    border-color: #2ECC71;
+}
+
+.harmony-box-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.harmony-side-box .harmony-select-group {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    font-size: 11px;
+    color: var(--text-color);
+}
+
+.harmony-side-box .harmony-select-group select {
+    width: 100%;
+    background: #1A1C20;
+    color: var(--text-bright);
+    border: 1px solid #444;
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+}
+
+.harmony-buttons-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.harmony-buttons-row .harmony-action-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 6px 0;
+}
+
+.harmony-badge {
+    background: var(--accent-blue);
+    color: var(--text-bright);
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.harmony-action-btn {
+    background: #383838;
+    color: var(--text-bright);
+    border: 1px solid #555;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.harmony-action-btn:hover { background: #4A4A4A; }
+.harmony-action-btn.active { background: #27AE60 !important; border-color: #2ECC71 !important; color: #FFF !important; }
+.harmony-action-btn.muted { background: #1E1E1E !important; color: #777 !important; border-color: #333 !important; }
+
+/* ==========================================================================
+   ОБНОВЛЕННЫЕ СТИЛИ КАРТОЧКИ АККОРДА (ЧИСТЫЙ СТИЛЬ БЕЗ СТРЕЛОК)
+   ========================================================================== */
+
+.harmony-boxes-container {
+    position: absolute;
+    bottom: 12px;
+    left: 240px;
+    right: 80px;
+    height: 85px;
+    pointer-events: none;
+    z-index: 110;
+    overflow: visible;
+}
+
+.chord-info-box {
+    position: absolute;
+    bottom: 0;
+    background: #1A1D24;
+    border: 1px solid #3A4252;
+    border-top: 3px solid #4A90E2;
+    border-radius: 6px;
+    padding: 6px 8px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+    pointer-events: auto;
+    cursor: pointer; /* Указываем, что бокс кликабельный */
+    transition: border-color 0.2s, transform 0.15s, background-color 0.15s;
+}
+
+.chord-info-box:hover {
+    border-color: #4A90E2;
+    background: #21252E;
+}
+
+.chord-info-box:active {
+    transform: scale(0.98);
+}
+
+.chord-selects-inline {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+}
+
+.chord-styled-select {
+    background: #252A34;
+    color: #FFFFFF;
+    border: 1px solid #3A4252;
+    border-radius: 4px;
+    padding: 2px 4px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: var(--font-main);
+    cursor: pointer;
+    outline: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    text-align: center;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.chord-styled-select:hover {
+    background: #2F3542;
+    border-color: #4A90E2;
+}
+
+.chord-slash-separator {
+    color: #72B0FF;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+.chord-degree-func-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.chord-degree-text {
+    color: #4A90E2;
+    font-weight: bold;
+}
+
+.chord-func-text {
+    color: #2ECC71;
+    font-weight: 600;
+}
+
+.chord-char-desc {
+    font-size: 10px;
+    color: #A0AEC0;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+
+
+.group-analysis-boxes-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    z-index: 100;
+}
+
+/* АНАЛИЗ ГРУППЫ НОТ */
+
+.group-harmony-analysis-card {
+    position: absolute;
+    pointer-events: auto;
+    background: rgba(30, 30, 30, 0.92);
+    border: 1px solid #4A90E2;
+    border-radius: 6px;
+    padding: 6px 8px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 170px;
+}
+
+.group-harmony-header {
+    font-size: 11px;
+    font-weight: bold;
+    color: #4A90E2;
+}
+
+.group-harmony-selects {
+    display: flex;
+    gap: 4px;
+}
+
+.group-harmony-selects select {
+    font-size: 11px;
+    padding: 2px 4px;
+    background: #2A2A2A;
+    color: #FFF;
+    border: 1px solid #444;
+    border-radius: 4px;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 9999;
+    justify-content: center;
+    align-items: center;
+}
+
+.modal-content {
+    background: #2c3e50;
+    color: #fff;
+    padding: 24px;
+    border-radius: 8px;
+    width: 280px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+
+.modal-content input {
+    padding: 8px 12px;
+    border-radius: 4px;
+    border: 1px solid #455a64;
+    background: #1e272c;
+    color: #fff;
+}
+
+.modal-content button {
+    padding: 8px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    background: #3498db;
+    color: white;
+    font-weight: bold;
+}
+
+/* Добавить в конец style.css */
+.toolbar-btn.btn-auth {
+    background: #3498db;
+    color: #ffffff;
+    border-color: #2980b9;
+    font-weight: 600;
+}
+
+.toolbar-btn.btn-auth:hover {
+    background: #2980b9;
+}
+
+/* --- ОБНОВЛЕННОЕ МОДАЛЬНОЕ ОКНО СТУДИИ --- */
+.studio-modal-content {
+    width: 85vw;
+    max-width: 1050px;
+    height: 80vh;
+    max-height: 720px;
+    background: #1e222a;
+    border: 1px solid #3a4252;
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+    display: flex;
+    flex-direction: column;
+    padding: 20px 24px;
+    box-sizing: border-box;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #333a48;
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 20px;
+    color: #4A90E2;
+}
+
+.btn-close {
+    background: transparent;
+    border: none;
+    color: #888;
+    font-size: 24px;
+    cursor: pointer;
+}
+.btn-close:hover { color: #fff; }
+
+.studio-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.studio-section {
+    background: #252a34;
+    padding: 14px;
+    border-radius: 8px;
+    border: 1px solid #323846;
+    display: flex;
+    flex-direction: column;
+}
+
+.studio-section h3 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-size: 14px;
+    color: #2ECC71;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.form-group {
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.form-group label {
+    font-size: 11px;
+    color: #aaa;
+}
+
+.inline-controls {
+    display: flex;
+    gap: 6px;
+}
+
+.styled-select, .styled-input, .styled-textarea {
+    width: 100%;
+    background: #181b21;
+    border: 1px solid #3a4252;
+    color: #fff;
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.styled-textarea {
+    resize: none;
+    height: 50px;
+}
+
+.primary-btn {
+    background: #4A90E2;
+    color: #fff;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.primary-btn:hover { background: #357ABD; }
+
+.success-btn {
+    background: #27AE60;
+    color: #fff;
+    border: none;
+    padding: 9px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+}
+.success-btn:hover { background: #219150; }
+
+.full-width { width: 100%; }
+.divider { border: 0; border-top: 1px solid #333a48; margin: 12px 0; }
+
+.buttons-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.action-btn {
+    background: #343a46;
+    color: #e0e0e0;
+    border: 1px solid #454f62;
+    padding: 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    font-size: 12px;
+    transition: background 0.15s, border-color 0.15s;
+}
+.action-btn:hover {
+    background: #414a5a;
+    border-color: #4A90E2;
+    color: #fff;
+}
+
+.info-card-box {
+    background: #181b21;
+    border: 1px solid #2e3543;
+    border-radius: 6px;
+    padding: 10px;
+    flex: 1;
+    overflow-y: auto;
+    font-size: 12px;
+}
+
+.progress-summary {
+    font-weight: bold;
+    color: #4A90E2;
+    margin-bottom: 8px;
+}
+
+.progress-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.progress-list li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.progress-list li.done { color: #2ECC71; }
+.progress-list li.pending { color: #777; }
+
+.badges-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.badge-card {
+    background: #232832;
+    border: 1px solid #333a48;
+    border-radius: 6px;
+    padding: 8px;
+    text-align: center;
+    opacity: 0.3;
+    filter: grayscale(100%);
+}
+
+.badge-card.unlocked {
+    opacity: 1;
+    filter: none;
+    border-color: #f1c40f;
+    background: #2a2e24;
+}
+
+.badge-icon { font-size: 20px; }
+.badge-title { font-size: 9px; margin-top: 2px; color: #ccc; }
+
+
+/* --- ОБНОВЛЕННОЕ МОДАЛЬНОЕ ОКНО УЧИТЕЛЯ--- */
+
+.teacher-grid {
+    grid-template-columns: 300px 1fr !important;
+}
+
+.wide-section {
+    display: flex;
+    flex-direction: column;
+}
+
+.teacher-work-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    flex: 1;
+}
+
+.submission-item {
+    background: #191c23;
+    padding: 8px 10px;
+    border-radius: 5px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    border: 1px solid #2d3342;
+    transition: all 0.2s;
+}
+
+.submission-item:hover {
+    border-color: #4A90E2;
+    background: #222733;
+}
+
+.submission-item.reviewed { border-left: 4px solid #2ECC71; }
+.submission-item.pending { border-left: 4px solid #f39c12; }
+
+.sub-user { font-weight: bold; color: #fff; font-size: 12px; }
+.sub-task { color: #aaa; font-size: 11px; }
+.sub-status { font-size: 10px; color: #4A90E2; margin-top: 2px; }
+
+.review-panel-box {
+    background: #181b21;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #333a48;
+    overflow-y: auto;
+}
+
+.review-panel-box h4 {
+    margin: 0 0 10px 0;
+    color: #2ECC71;
+    font-size: 13px;
+}
+
+.help-text {
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 12px;
+}
