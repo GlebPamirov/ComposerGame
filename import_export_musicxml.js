@@ -1,130 +1,49 @@
 /**
  * Модуль импорта и экспорта MusicXML
+ * Приоритет: 100% точное сохранение длительностей, наложений (легато/арпеджио) и Velocity.
  */
 
-function decomposeDuration(dur) {
-    const valid = [16, 12, 8, 6, 4, 3, 2, 1];
-    const result = [];
-    let rem = dur;
-    while (rem > 0) {
-        const d = valid.find(v => v <= rem) || 1;
-        result.push(d);
-        rem -= d;
-    }
-    return result;
+// Определение визуального типа ноты для MusicXML (для совместимости с нотными редакторами)
+function getTypeAndDot(durationIn16ths) {
+    if (durationIn16ths >= 16) return { type: 'whole', dot: false };
+    if (durationIn16ths >= 12) return { type: 'half', dot: true };
+    if (durationIn16ths >= 8)  return { type: 'half', dot: false };
+    if (durationIn16ths >= 6)  return { type: 'quarter', dot: true };
+    if (durationIn16ths >= 4)  return { type: 'quarter', dot: false };
+    if (durationIn16ths >= 3)  return { type: 'eighth', dot: true };
+    if (durationIn16ths >= 2)  return { type: 'eighth', dot: false };
+    return { type: '16th', dot: false };
 }
 
-function getTypeAndDot(durationSlots) {
-    switch (durationSlots) {
-        case 16: return { type: 'whole', dot: false };
-        case 12: return { type: 'half', dot: true };
-        case 8:  return { type: 'half', dot: false };
-        case 6:  return { type: 'quarter', dot: true };
-        case 4:  return { type: 'quarter', dot: false };
-        case 3:  return { type: 'eighth', dot: true };
-        case 2:  return { type: 'eighth', dot: false };
-        case 1:  return { type: '16th', dot: false };
-        default: return { type: 'quarter', dot: false };
-    }
-}
-
-function generateRestXML(gapLen, startOffsetInMeasure) {
-    let xml = '';
-    let rem = gapLen;
-    let curr = startOffsetInMeasure;
-
-    while (rem > 0) {
-        let rDur = 0;
-        let offsetInBeat = curr % 4;
-
-        if (offsetInBeat !== 0) {
-            let neededToAlign = 4 - offsetInBeat;
-            rDur = Math.min(rem, neededToAlign);
-        } else {
-            if (rem >= 12 && curr % 12 === 0) rDur = 12;
-            else if (rem >= 8 && curr % 8 === 0) rDur = 8;
-            else if (rem >= 4) rDur = 4;
-            else if (rem >= 2) rDur = 2;
-            else rDur = 1;
-        }
-
-        const typeInfo = getTypeAndDot(rDur);
-        xml += `      <note>\n`;
-        xml += `        <rest/>\n`;
-        xml += `        <duration>${rDur}</duration>\n`;
-        if (typeInfo.type) xml += `        <type>${typeInfo.type}</type>\n`;
-        if (typeInfo.dot) xml += `        <dot/>\n`;
-        xml += `      </note>\n`;
-
-        rem -= rDur;
-        curr += rDur;
-    }
-    return xml;
-}
-
-function formatNoteXML(pitch, duration, tieStart, tieStop, isChord) {
-    const stepName = ['C', 'C', 'D', 'D', 'E', 'F', 'F', 'G', 'G', 'A', 'A', 'B'][pitch % 12];
-    const alter = [1, 3, 6, 8, 10].includes(pitch % 12) ? 1 : 0;
-    const octave = Math.floor(pitch / 12) - 1;
-    const typeInfo = getTypeAndDot(duration);
-
-    let xml = `      <note>\n`;
-    if (isChord) xml += `        <chord/>\n`;
-    xml += `        <pitch>\n`;
-    xml += `          <step>${stepName}</step>\n`;
-    if (alter !== 0) xml += `          <alter>${alter}</alter>\n`;
-    xml += `          <octave>${octave}</octave>\n`;
-    xml += `        </pitch>\n`;
-    xml += `        <duration>${duration}</duration>\n`;
-    
-    if (tieStop) xml += `        <tie type="stop"/>\n`;
-    if (tieStart) xml += `        <tie type="start"/>\n`;
-    
-    if (typeInfo.type) xml += `        <type>${typeInfo.type}</type>\n`;
-    if (typeInfo.dot) xml += `        <dot/>\n`;
-
-    if (tieStart || tieStop) {
-        xml += `        <notations>\n`;
-        if (tieStop) xml += `          <tied type="stop"/>\n`;
-        if (tieStart) xml += `          <tied type="start"/>\n`;
-        xml += `        </notations>\n`;
-    }
-    xml += `      </note>\n`;
-    return xml;
-}
-
-// ЭКСПОРТ В MUSICXML (Экспортируются только используемые такты в порядке UI)
-function exportMusicXML(editor) {
+// Построение единой строки MusicXML
+function buildMusicXMLString(editor, customTitle) {
     const bpm = document.getElementById('input-bpm')?.value || 120;
     const timeSig = (document.getElementById('select-time-sig')?.value || '4/4').split('/');
-    const beats = parseInt(timeSig[0]) || 4;
-    const beatType = parseInt(timeSig[1]) || 4;
+    const beats = parseInt(timeSig[0], 10) || 4;
+    const beatType = parseInt(timeSig[1], 10) || 4;
 
-    // Чтение названия трека из UI
     const titleInput = document.getElementById('track-title-input');
-    const trackTitle = (titleInput && titleInput.value.trim()) ? titleInput.value.trim() : "Без автора и Без названия";
+    const trackTitle = customTitle || (titleInput && titleInput.value.trim()) || "Без названия";
 
+    // 24 divisions per quarter note — идеальный делитель для любых размеров
+    const divisions = 24; 
     const slotsPerBeat = 16 / beatType;
-    const beatsPerMeasure = beats * slotsPerBeat;
+    const beatsPerMeasure = Math.round(beats * slotsPerBeat);
 
-    // Получение треков строго в порядке UI (учитывает перетаскивание)
     const trackIds = (typeof editor.getOrderedTracks === 'function') 
         ? editor.getOrderedTracks() 
         : Object.keys(editor.tracks);
 
-    // Определение максимального занятого слота во всех треках
+    // Вычисляем общую длину композиции в тактах
     let maxEndSlot = 0;
     trackIds.forEach(key => {
         const trackNotes = editor.tracks[key] || [];
         trackNotes.forEach(note => {
             const noteEnd = note.start + note.duration;
-            if (noteEnd > maxEndSlot) {
-                maxEndSlot = noteEnd;
-            }
+            if (noteEnd > maxEndSlot) maxEndSlot = noteEnd;
         });
     });
 
-    // Экспортируем ровно столько тактов, сколько перекрывают ноты (минимум 1 такт)
     const totalMeasures = Math.max(1, Math.ceil(maxEndSlot / beatsPerMeasure));
 
     let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
@@ -150,6 +69,7 @@ function exportMusicXML(editor) {
         const partId = activePartIds[key];
         const rawNotes = editor.tracks[key] || [];
 
+        // Разбиваем длинные ноты по тактам С СОХРАНЕНИЕМ ЛИГ (tie), если они пересекают границу такта
         const measureSegments = [];
         rawNotes.forEach(n => {
             let currStart = n.start;
@@ -169,6 +89,7 @@ function exportMusicXML(editor) {
                     pitch: n.pitch,
                     start: currStart,
                     duration: segDuration,
+                    velocity: n.velocity ?? 100,
                     tieStart: hasTieStart,
                     tieStop: hasTieStop,
                     measureIndex: mIndex
@@ -183,13 +104,12 @@ function exportMusicXML(editor) {
 
         for (let m = 0; m < totalMeasures; m++) {
             const measureStart = m * beatsPerMeasure;
-            const measureEnd = measureStart + beatsPerMeasure;
             const mNotes = measureSegments.filter(n => n.measureIndex === m);
 
             xml += `    <measure number="${m + 1}">\n`;
             if (m === 0) {
                 xml += `      <attributes>\n`;
-                xml += `        <divisions>4</divisions>\n`;
+                xml += `        <divisions>${divisions}</divisions>\n`;
                 xml += `        <key><fifths>0</fifths></key>\n`;
                 xml += `        <time><beats>${beats}</beats><beat-type>${beatType}</beat-type></time>\n`;
                 xml += `        <clef><sign>G</sign><line>2</line></clef>\n`;
@@ -198,243 +118,107 @@ function exportMusicXML(editor) {
             }
 
             if (mNotes.length === 0) {
+                // Пустой такт (пауза)
+                const restDivs = Math.round(beatsPerMeasure * (divisions / 4));
                 xml += `      <note>\n`;
                 xml += `        <rest measure="yes"/>\n`;
-                xml += `        <duration>${beatsPerMeasure}</duration>\n`;
+                xml += `        <duration>${restDivs}</duration>\n`;
                 xml += `      </note>\n`;
             } else {
-                const startTimes = Array.from(new Set(mNotes.map(n => n.start))).sort((a, b) => a - b);
-                let cursor = measureStart;
+                // Сортируем ноты по времени старта
+                mNotes.sort((a, b) => a.start - b.start);
 
-                startTimes.forEach((t, idx) => {
-                    if (t > cursor) {
-                        const gapLen = t - cursor;
-                        const startOffset = cursor - measureStart;
-                        xml += generateRestXML(gapLen, startOffset);
-                        cursor = t;
+                let measureTimeCursor = measureStart;
+
+                mNotes.forEach((n) => {
+                    // Если нота начинается позже текущего положения курсора такта
+                    if (n.start > measureTimeCursor) {
+                        const gap16ths = n.start - measureTimeCursor;
+                        const gapDivs = Math.round(gap16ths * (divisions / 4));
+                        xml += `      <note>\n`;
+                        xml += `        <rest/>\n`;
+                        xml += `        <duration>${gapDivs}</duration>\n`;
+                        xml += `      </note>\n`;
+                        measureTimeCursor = n.start;
+                    } 
+                    // Если нота начинается раньше (наложение / легато / арпеджио)
+                    else if (n.start < measureTimeCursor) {
+                        const back16ths = measureTimeCursor - n.start;
+                        const backDivs = Math.round(back16ths * (divisions / 4));
+                        xml += `      <backup>\n`;
+                        xml += `        <duration>${backDivs}</duration>\n`;
+                        xml += `      </backup>\n`;
+                        measureTimeCursor = n.start;
                     }
 
-                    const chordGroup = mNotes.filter(n => n.start === t);
-                    const nextT = (idx < startTimes.length - 1) ? startTimes[idx + 1] : measureEnd;
-                    const maxAllowedDur = nextT - t;
+                    const durationDivs = Math.round(n.duration * (divisions / 4));
+                    const velocityPct = Math.min(100, Math.max(1, Math.round(((n.velocity ?? 100) / 127) * 100)));
+                    const stepName = ['C', 'C', 'D', 'D', 'E', 'F', 'F', 'G', 'G', 'A', 'A', 'B'][n.pitch % 12];
+                    const alter = [1, 3, 6, 8, 10].includes(n.pitch % 12) ? 1 : 0;
+                    const octave = Math.floor(n.pitch / 12) - 1;
+                    const typeInfo = getTypeAndDot(n.duration);
 
-                    const rawMaxDur = Math.max(...chordGroup.map(n => n.duration));
-                    const groupDur = Math.max(1, Math.min(rawMaxDur, maxAllowedDur));
+                    xml += `      <note>\n`;
+                    xml += `        <pitch>\n`;
+                    xml += `          <step>${stepName}</step>\n`;
+                    if (alter !== 0) xml += `          <alter>${alter}</alter>\n`;
+                    xml += `          <octave>${octave}</octave>\n`;
+                    xml += `        </pitch>\n`;
+                    xml += `        <duration>${durationDivs}</duration>\n`;
+                    xml += `        <sound dynamics="${velocityPct}"/>\n`;
 
-                    const subDurs = decomposeDuration(groupDur);
+                    if (n.tieStop) xml += `        <tie type="stop"/>\n`;
+                    if (n.tieStart) xml += `        <tie type="start"/>\n`;
 
-                    subDurs.forEach((subDur, subIdx) => {
-                        chordGroup.forEach((n, chordIdx) => {
-                            const isChord = chordIdx > 0;
-                            const isSubTieStart = (subIdx < subDurs.length - 1) || n.tieStart;
-                            const isSubTieStop = (subIdx > 0) || n.tieStop;
+                    if (typeInfo.type) xml += `        <type>${typeInfo.type}</type>\n`;
+                    if (typeInfo.dot) xml += `        <dot/>\n`;
 
-                            xml += formatNoteXML(n.pitch, subDur, isSubTieStart, isSubTieStop, isChord);
-                        });
-                    });
+                    if (n.tieStart || n.tieStop) {
+                        xml += `        <notations>\n`;
+                        if (n.tieStop) xml += `          <tied type="stop"/>\n`;
+                        if (n.tieStart) xml += `          <tied type="start"/>\n`;
+                        xml += `        </notations>\n`;
+                    }
+                    xml += `      </note>\n`;
 
-                    cursor += groupDur;
+                    measureTimeCursor += n.duration;
                 });
-
-                if (cursor < measureEnd) {
-                    const gapLen = measureEnd - cursor;
-                    const startOffset = cursor - measureStart;
-                    xml += generateRestXML(gapLen, startOffset);
-                }
             }
             xml += `    </measure>\n`;
         }
         xml += `  </part>\n`;
     });
 
-    xml += `</score-partwise>`;
+    xml += '</score-partwise>';
+    return xml;
+}
 
-    const blob = new Blob([xml], { type: 'text/xml' });
+// Экспорт в файл
+function exportMusicXML(editor) {
+    const titleInput = document.getElementById('track-title-input');
+    const trackTitle = (titleInput && titleInput.value.trim()) ? titleInput.value.trim() : "Без названия";
+    
+    const xmlContent = buildMusicXMLString(editor, trackTitle);
+
+    const blob = new Blob([xmlContent], { type: 'text/xml' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = `${trackTitle}.musicxml`;
     link.click();
 }
 
-// 1. Единый генератор MusicXML-строки для использования везде (экспорт, сохранение учителя, сохранение ученика)
-	function buildMusicXMLString(editor, customTitle) {
-		const bpm = document.getElementById('input-bpm')?.value || 120;
-		const timeSig = (document.getElementById('select-time-sig')?.value || '4/4').split('/');
-		const beats = parseInt(timeSig[0]) || 4;
-		const beatType = parseInt(timeSig[1]) || 4;
-
-		const titleInput = document.getElementById('track-title-input');
-		const trackTitle = customTitle || (titleInput && titleInput.value.trim()) || "Без названия";
-
-		const slotsPerBeat = 16 / beatType;
-		const beatsPerMeasure = beats * slotsPerBeat;
-
-		const trackIds = (typeof editor.getOrderedTracks === 'function') 
-			? editor.getOrderedTracks() 
-			: Object.keys(editor.tracks);
-
-		let maxEndSlot = 0;
-		trackIds.forEach(key => {
-			const trackNotes = editor.tracks[key] || [];
-			trackNotes.forEach(note => {
-				const noteEnd = note.start + note.duration;
-				if (noteEnd > maxEndSlot) maxEndSlot = noteEnd;
-			});
-		});
-
-		const totalMeasures = Math.max(1, Math.ceil(maxEndSlot / beatsPerMeasure));
-
-		let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-		xml += `<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">\n`;
-		xml += `<score-partwise version="4.0">\n`;
-		xml += `  <work><work-title>${trackTitle}</work-title></work>\n`;
-		xml += `  <movement-title>${trackTitle}</movement-title>\n`;
-		
-		xml += `  <part-list>\n`;
-		let pId = 1;
-		const activePartIds = {};
-		trackIds.forEach(key => {
-			const partId = `P${pId++}`;
-			activePartIds[key] = partId;
-			const name = editor.instrumentTypes[key]?.name || key;
-			xml += `    <score-part id="${partId}">\n`;
-			xml += `      <part-name>${name}</part-name>\n`;
-			xml += `    </score-part>\n`;
-		});
-		xml += `  </part-list>\n`;
-
-		trackIds.forEach(key => {
-			const partId = activePartIds[key];
-			const rawNotes = editor.tracks[key] || [];
-
-			const measureSegments = [];
-			rawNotes.forEach(n => {
-				let currStart = n.start;
-				let remDuration = n.duration;
-
-				while (remDuration > 0) {
-					const mIndex = Math.floor(currStart / beatsPerMeasure);
-					const measureStart = mIndex * beatsPerMeasure;
-					const measureEnd = measureStart + beatsPerMeasure;
-					const maxPossibleInMeasure = measureEnd - currStart;
-
-					const segDuration = Math.min(remDuration, maxPossibleInMeasure);
-					const hasTieStart = (remDuration > segDuration);
-					const hasTieStop = (currStart > n.start);
-
-					measureSegments.push({
-						pitch: n.pitch,
-						start: currStart,
-						duration: segDuration,
-						tieStart: hasTieStart,
-						tieStop: hasTieStop,
-						measureIndex: mIndex
-					});
-
-					currStart += segDuration;
-					remDuration -= segDuration;
-				}
-			});
-
-			xml += `  <part id="${partId}">\n`;
-
-			for (let m = 0; m < totalMeasures; m++) {
-				const measureStart = m * beatsPerMeasure;
-				const measureEnd = measureStart + beatsPerMeasure;
-				const mNotes = measureSegments.filter(n => n.measureIndex === m);
-
-				xml += `    <measure number="${m + 1}">\n`;
-				if (m === 0) {
-					xml += `      <attributes>\n`;
-					xml += `        <divisions>4</divisions>\n`;
-					xml += `        <key><fifths>0</fifths></key>\n`;
-					xml += `        <time><beats>${beats}</beats><beat-type>${beatType}</beat-type></time>\n`;
-					xml += `        <clef><sign>G</sign><line>2</line></clef>\n`;
-					xml += `      </attributes>\n`;
-					xml += `      <direction><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${bpm}</per-minute></metronome></direction-type></direction>\n`;
-				}
-
-				if (mNotes.length === 0) {
-					xml += `      <note>\n`;
-					xml += `        <rest measure="yes"/>\n`;
-					xml += `        <duration>${beatsPerMeasure}</duration>\n`;
-					xml += `      </note>\n`;
-				} else {
-					const startTimes = Array.from(new Set(mNotes.map(n => n.start))).sort((a, b) => a - b);
-					let cursor = measureStart;
-
-					startTimes.forEach((t, idx) => {
-						if (t > cursor) {
-							const gapLen = t - cursor;
-							const startOffset = cursor - measureStart;
-							xml += generateRestXML(gapLen, startOffset);
-							cursor = t;
-						}
-
-						const chordGroup = mNotes.filter(n => n.start === t);
-						const nextT = (idx < startTimes.length - 1) ? startTimes[idx + 1] : measureEnd;
-						const maxAllowedDur = nextT - t;
-
-						const rawMaxDur = Math.max(...chordGroup.map(n => n.duration));
-						const groupDur = Math.max(1, Math.min(rawMaxDur, maxAllowedDur));
-
-						const subDurs = decomposeDuration(groupDur);
-
-						subDurs.forEach((subDur, subIdx) => {
-							chordGroup.forEach((n, chordIdx) => {
-								const isChord = chordIdx > 0;
-								const isSubTieStart = (subIdx < subDurs.length - 1) || n.tieStart;
-								const isSubTieStop = (subIdx > 0) || n.tieStop;
-
-								xml += formatNoteXML(n.pitch, subDur, isSubTieStart, isSubTieStop, isChord);
-							});
-						});
-
-						cursor += groupDur;
-					});
-
-					if (cursor < measureEnd) {
-						const gapLen = measureEnd - cursor;
-						const startOffset = cursor - measureStart;
-						xml += generateRestXML(gapLen, startOffset);
-					}
-				}
-				xml += `    </measure>\n`;
-			}
-			xml += `  </part>\n`;
-		});
-
-		xml += `</score-partwise>`;
-		return xml;
-	}
-
-	// 2. Скачивание файла в браузере (теперь просто вызывает buildMusicXMLString)
-	function exportMusicXML(editor) {
-		const titleInput = document.getElementById('track-title-input');
-		const trackTitle = (titleInput && titleInput.value.trim()) ? titleInput.value.trim() : "Без названия";
-		
-		const xmlContent = buildMusicXMLString(editor, trackTitle);
-
-		const blob = new Blob([xmlContent], { type: 'text/xml' });
-		const link = document.createElement('a');
-		link.href = URL.createObjectURL(blob);
-		link.download = `${trackTitle}.musicxml`;
-		link.click();
-	}
-
+// Импорт из файла c 100% восстановлением оригинальных длительностей и Velocity
 function importMusicXML(xmlText, editor) {
     try {
-        // 0. Проверка: не вернул ли Google Drive HTML-страницу вместо XML
         if (!xmlText || typeof xmlText !== 'string' || xmlText.trim().startsWith('<!DOCTYPE html>') || xmlText.includes('<html')) {
-            console.error('[Import] Ошибка: Получены неверные данные (HTML вместо XML). Проверьте права доступа к файлу на Google Диске.');
-            alert('Ошибка загрузки: Google Диск вернул страницу авторизации вместо нотного файла. Проверьте права доступа к файлу.');
+            console.error('[Import] Ошибка: Получены неверные данные.');
+            alert('Ошибка загрузки нотного файла.');
             return;
         }
 
         const parser = new DOMParser();
         const xmlDoc = parser.parseFromString(xmlText, "text/xml");
 
-        // Проверка ошибок парсинга XML
         const parserError = xmlDoc.querySelector('parsererror');
         if (parserError) {
             console.error('[Import] Ошибка структуры XML:', parserError.textContent);
@@ -442,20 +226,18 @@ function importMusicXML(xmlText, editor) {
             return;
         }
 
-        // 1. Извлечение названия трека
+        // Заголовок
         const workTitle = xmlDoc.querySelector('work-title')?.textContent;
         const movementTitle = xmlDoc.querySelector('movement-title')?.textContent;
         const trackTitle = (workTitle || movementTitle || "Без названия").trim();
 
         const titleInput = document.getElementById('track-title-input');
-        if (titleInput) {
-            titleInput.value = trackTitle;
-        }
+        if (titleInput) titleInput.value = trackTitle;
 
-        // 2. Темп (BPM)
+        // Темп (BPM)
         const bpmElem = xmlDoc.querySelector('per-minute');
         if (bpmElem) {
-            const bpm = parseInt(bpmElem.textContent) || 120;
+            const bpm = parseInt(bpmElem.textContent, 10) || 120;
             const bpmInput = document.getElementById('input-bpm');
             if (bpmInput) bpmInput.value = bpm;
             if (typeof Tone !== 'undefined' && Tone.Transport) {
@@ -463,20 +245,18 @@ function importMusicXML(xmlText, editor) {
             }
         }
 
-        // 3. Размер (Time Signature)
+        // Размер (Time Signature)
         const beatsElem = xmlDoc.querySelector('time > beats');
         const beatTypeElem = xmlDoc.querySelector('time > beat-type');
         if (beatsElem && beatTypeElem) {
             const timeSig = `${beatsElem.textContent.trim()}/${beatTypeElem.textContent.trim()}`;
             const selectTimeSig = document.getElementById('select-time-sig');
-            if (selectTimeSig) {
-                selectTimeSig.value = timeSig;
-            }
+            if (selectTimeSig) selectTimeSig.value = timeSig;
         }
 
         const newTracks = {};
         const parts = xmlDoc.querySelectorAll('part');
-        let totalNotesCount = 0; // Счётчик найденных нот
+        let totalNotesCount = 0;
         
         parts.forEach((part, index) => {
             const partId = part.getAttribute('id') || `part_${index}`;
@@ -493,74 +273,115 @@ function importMusicXML(xmlText, editor) {
             };
             newTracks[trackKey] = [];
 
-            let currentDivisions = 4; // Запасное значение по умолчанию
+            let currentDivisions = 24;
             let timelineCursor = 0;
             let lastNoteStart = 0;
+
+            // Буфер для склеивания залигованных нот (ties) в единую ноту
+            const activeTies = {}; // { pitch: noteObject }
 
             const measures = part.querySelectorAll('measure');
             
             measures.forEach((measure) => {
                 const divElem = measure.querySelector('attributes > divisions');
                 if (divElem) {
-                    const parsedDiv = parseInt(divElem.textContent);
+                    const parsedDiv = parseInt(divElem.textContent, 10);
                     if (parsedDiv > 0) currentDivisions = parsedDiv;
                 }
 
-                const notes = measure.querySelectorAll('note');
-                notes.forEach((note) => {
-                    const isChord = note.querySelector('chord') !== null;
-                    const durationElem = note.querySelector('duration');
-                    const rawDuration = durationElem ? parseInt(durationElem.textContent) : 0;
-                    
-                    // Безопасный расчёт длительности в 16-х долях
-                    const durationIn16ths = Math.max(1, Math.round((rawDuration / currentDivisions) * 4));
+                const children = Array.from(measure.children);
 
-                    if (isChord) {
-                        timelineCursor = lastNoteStart;
-                    } else {
-                        lastNoteStart = timelineCursor;
-                    }
-
-                    const pitchElem = note.querySelector('pitch');
-                    const isRest = note.querySelector('rest') !== null;
-
-                    if (pitchElem && !isRest) {
-                        const step = pitchElem.querySelector('step')?.textContent.trim() || 'C';
-                        const alter = parseInt(pitchElem.querySelector('alter')?.textContent || '0');
-                        const octave = parseInt(pitchElem.querySelector('octave')?.textContent || '4');
-
-                        const stepOffsets = { 'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11 };
-                        const midiPitch = (octave + 1) * 12 + (stepOffsets[step] || 0) + alter;
-
-                        const tieStop = note.querySelector('tie[type="stop"]');
-                        let targetNote = null;
-
-                        if (tieStop) {
-                            targetNote = newTracks[trackKey].find(n => 
-                                n.pitch === midiPitch && (n.start + n.duration === timelineCursor)
-                            );
+                children.forEach((node) => {
+                    if (node.tagName === 'forward') {
+                        const durElem = node.querySelector('duration');
+                        if (durElem) {
+                            const rawDur = parseInt(durElem.textContent, 10) || 0;
+                            timelineCursor += Math.round((rawDur / currentDivisions) * 4);
                         }
+                    } else if (node.tagName === 'backup') {
+                        const durElem = node.querySelector('duration');
+                        if (durElem) {
+                            const rawDur = parseInt(durElem.textContent, 10) || 0;
+                            timelineCursor -= Math.round((rawDur / currentDivisions) * 4);
+                        }
+                    } else if (node.tagName === 'note') {
+                        const note = node;
+                        const isChord = note.querySelector('chord') !== null;
+                        const durationElem = note.querySelector('duration');
+                        const rawDuration = durationElem ? parseInt(durationElem.textContent, 10) : 0;
+                        
+                        const durationIn16ths = Math.max(1, Math.round((rawDuration / currentDivisions) * 4));
 
-                        if (targetNote) {
-                            targetNote.duration += durationIn16ths;
+                        if (isChord) {
+                            timelineCursor = lastNoteStart;
                         } else {
-                            newTracks[trackKey].push({
-                                pitch: midiPitch,
-                                start: timelineCursor,
-                                duration: durationIn16ths,
-                                dotted: note.querySelector('dot') !== null
-                            });
-                            totalNotesCount++;
+                            lastNoteStart = timelineCursor;
+                        }
+
+                        const pitchElem = note.querySelector('pitch');
+                        const isRest = note.querySelector('rest') !== null;
+
+                        if (pitchElem && !isRest) {
+                            const step = pitchElem.querySelector('step')?.textContent.trim() || 'C';
+                            const alter = parseInt(pitchElem.querySelector('alter')?.textContent || '0', 10);
+                            const octave = parseInt(pitchElem.querySelector('octave')?.textContent || '4', 10);
+
+                            const stepOffsets = { 'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11 };
+                            const midiPitch = (octave + 1) * 12 + (stepOffsets[step] || 0) + alter;
+
+                            // Чтение Velocity
+                            let velocity = 100;
+                            const soundEl = note.querySelector('sound');
+                            const dynamicsEl = note.querySelector('dynamics');
+
+                            if (soundEl && soundEl.getAttribute('dynamics')) {
+                                const dynPct = parseFloat(soundEl.getAttribute('dynamics'));
+                                velocity = Math.min(127, Math.max(1, Math.round((dynPct / 100) * 127)));
+                            } else if (dynamicsEl && dynamicsEl.firstElementChild) {
+                                const tag = dynamicsEl.firstElementChild.tagName.toLowerCase();
+                                const dynMap = { ppp: 30, pp: 45, p: 60, mp: 75, mf: 90, f: 105, ff: 118, fff: 127 };
+                                if (dynMap[tag]) velocity = dynMap[tag];
+                            }
+
+                            // Восстановление длинных нот через лиги (tie/tied)
+                            const tieTypes = Array.from(note.querySelectorAll('tie, tied')).map(t => t.getAttribute('type'));
+                            const isTieStart = tieTypes.includes('start');
+                            const isTieStop = tieTypes.includes('stop');
+
+                            if (isTieStop && activeTies[midiPitch]) {
+                                // Если нота переходит через такт, сшиваем её обратно в одну целостную ноту
+                                activeTies[midiPitch].duration += durationIn16ths;
+                                
+                                if (!isTieStart) {
+                                    delete activeTies[midiPitch];
+                                }
+                            } else {
+                                const newNote = {
+                                    pitch: midiPitch,
+                                    start: timelineCursor,
+                                    duration: durationIn16ths,
+                                    velocity: velocity,
+                                    dotted: note.querySelector('dot') !== null
+                                };
+
+                                newTracks[trackKey].push(newNote);
+                                totalNotesCount++;
+
+                                if (isTieStart) {
+                                    activeTies[midiPitch] = newNote;
+                                }
+                            }
+                        }
+
+                        if (!isChord) {
+                            timelineCursor += durationIn16ths;
                         }
                     }
-
-                    timelineCursor += durationIn16ths;
                 });
             });
         });
 
         if (totalNotesCount > 0) {
-            // Перезаписываем дорожки в редакторе
             editor.tracks = newTracks;
             editor.activeTrack = Object.keys(newTracks)[0];
             
@@ -568,7 +389,7 @@ function importMusicXML(xmlText, editor) {
                 editor.tracksOrder = Object.keys(newTracks);
             }
 
-            // Перерисовываем UI
+            // Обновление UI
             const list = document.getElementById('instruments-list');
             if (list) {
                 list.innerHTML = '';
@@ -583,7 +404,6 @@ function importMusicXML(xmlText, editor) {
                 editor.selectTrack(editor.activeTrack);
             }
 
-            // Обновляем холст редактора
             if (typeof editor.updateGrid === 'function') editor.updateGrid();
             if (typeof editor.renderNotes === 'function') editor.renderNotes();
             if (typeof editor.draw === 'function') editor.draw();
@@ -591,8 +411,8 @@ function importMusicXML(xmlText, editor) {
 
             console.log(`[Import] Успешно загружено нот: ${totalNotesCount}`, newTracks);
         } else {
-            console.warn('[Import] Структура файла прочитана, но ноты не найдены:', newTracks);
-            alert('Файл MusicXML не содержит нот или ноты сохранили в пустом формате.');
+            console.warn('[Import] Ноты не найдены.');
+            alert('Файл MusicXML не содержит нот.');
         }
     } catch (err) {
         console.error('Ошибка при импорте MusicXML:', err);
