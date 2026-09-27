@@ -72,6 +72,38 @@ class KeyboardManager {
 				e.preventDefault();
 				this.pianoRoll.redo();
 			}
+
+			// Внутри window.addEventListener('keydown', (e) => { ... })[cite: 15]
+
+			// Выбор длительностей нот с клавиатуры
+			const durMap = {
+			    'Digit1': 1,     'Numpad1': 1,      // 1 - целая (1/1)
+			    'Digit2': 0.5,   'Numpad2': 0.5,    // 2 - половина (1/2)
+			    'Digit4': 0.25,  'Numpad4': 0.25,   // 4 - четверть (1/4)
+			    'Digit8': 0.125, 'Numpad8': 0.125,  // 8 - восьмая (1/8)
+			    'Digit6': 0.0625,'Numpad6': 0.0625  // 6 - шестнадцатая (1/16)
+			};
+			
+			if (durMap[e.code] !== undefined) {
+			    e.preventDefault();
+			    const targetDur = durMap[e.code];
+			    const btn = document.querySelector(`.dur-btn[data-dur="${targetDur}"]`);
+			    if (btn) {
+			        // Симулируем клик по соответствующей кнопке длительности
+			        btn.click();
+			    }
+			}
+			
+			// Нажатие точки (Period) — переключение длительности с точкой
+			if (e.code === 'Period' || e.code === 'NumpadDecimal') {
+			    e.preventDefault();
+			    const activeBtn = document.querySelector('.dur-btn.active');
+			    if (activeBtn) {
+			        // Симулируем двойной клик для включения/отключения точки
+			        activeBtn.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+			    }
+			}
+			
         });
     }
 
