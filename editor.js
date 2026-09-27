@@ -887,30 +887,38 @@ class PianoRoll {
                 this.updateGrid();
             });
 
-            btn.addEventListener('dblclick', (e) => {
-                e.preventDefault();
-                this.switchToSingleNoteMode();
+            // Замените существующий btn.addEventListener('dblclick', ...) на этот код:
+			btn.addEventListener('dblclick', (e) => {
+				e.preventDefault();
+				this.switchToSingleNoteMode();
 
-                const target = e.currentTarget;
+				const target = e.currentTarget;
 
-                if (!target.dataset.baseText) {
-                    target.dataset.baseText = target.innerText;
-                }
+				if (!target.dataset.baseText) {
+					target.dataset.baseText = target.innerText.replace('.', '');
+				}
 
-                document.querySelectorAll('.dur-btn').forEach(b => {
-                    b.classList.remove('active');
-                    if (b.dataset.baseText) b.innerText = b.dataset.baseText;
-                });
+				// Если точка уже установлена — снимаем её и возвращаемся к исходной длительности
+				if (this.hasDotted && this.baseDuration === parseFloat(target.dataset.dur)) {
+					this.selectedDuration = this.baseDuration;
+					this.hasDotted = false;
+					target.innerText = target.dataset.baseText;
+				} else {
+					// Иначе включаем режим ноты с точкой
+					document.querySelectorAll('.dur-btn').forEach(b => {
+						b.classList.remove('active');
+						if (b.dataset.baseText) b.innerText = b.dataset.baseText;
+					});
 
-                target.classList.add('active');
-                this.baseDuration = parseFloat(target.dataset.dur);
-                this.selectedDuration = this.baseDuration * 1.5;
-                this.hasDotted = true;
+					target.classList.add('active');
+					this.baseDuration = parseFloat(target.dataset.dur);
+					this.selectedDuration = this.baseDuration * 1.5;
+					this.hasDotted = true;
+					target.innerText = target.dataset.baseText + '.';
+				}
 
-                target.innerText = target.dataset.baseText + '.';
-
-                this.updateGrid();
-            });
+				this.updateGrid();
+			});
         });
 
         // Смена инструмента переключает на режим одиночной ноты
