@@ -1,8 +1,8 @@
 /**
  * Модуль импорта и экспорта MusicXML для Piano Roll Editor
- * Обеспечивает 100% точное распределение нот по долям такта,
- * поддержку размеров (4/4, 3/4, 2/4 и т.д.), полифонии, аккордов,
- * повторяющихся нот и СОХРАНЕНИЕ/ИМПОРТ VELOCITY (громкости).
+ * Обеспечивает 100% точное распределение нот произвольной длительности,
+ * со слабых долей, через границы тактов (с лигами), полифонии,
+ * аккордов и сохранение Velocity (громкости).
  */
 
 // Карта соответствия MIDI-полутонов нотным шагам MusicXML
@@ -104,7 +104,7 @@ function buildMusicXMLString(editor, customTitle) {
         const partId = activePartIds[key];
         const rawNotes = editor.tracks[key] || [];
 
-        // Разбиваем длинные ноты по границам тактов с лигами (tie)
+        // Разбиваем ноты произвольной длины по границам тактов с лигами (tie)
         const measureSegments = [];
         rawNotes.forEach(n => {
             let currStart = n.start;
@@ -164,6 +164,7 @@ function buildMusicXMLString(editor, customTitle) {
                 // Сортируем ноты по времени их появления
                 const startTimes = Array.from(new Set(mNotes.map(n => n.start))).sort((a, b) => a - b);
                 let measureCursor = mStart;
+                let maxTimeInMeasure = mStart;
 
                 startTimes.forEach((t) => {
                     if (t > measureCursor) {
@@ -184,20 +185,23 @@ function buildMusicXMLString(editor, customTitle) {
                         measureCursor = t;
                     }
 
-                    const notesAtT = mNotes.filter(n => n.start === t);
+                    // Сортируем ноты в одной точке времени по убыванию длительности,
+                    // чтобы первая нота аккорда задавала корректный шаг каретки времени
+                    const notesAtT = mNotes.filter(n => n.start === t).sort((a, b) => b.duration - a.duration);
                     let maxDurationAtT = 0;
 
                     notesAtT.forEach((n, idx) => {
                         const isChord = (idx > 0);
                         const durDivs = n.duration * 6;
                         if (n.duration > maxDurationAtT) maxDurationAtT = n.duration;
+                        if (t + n.duration > maxTimeInMeasure) maxTimeInMeasure = t + n.duration;
 
                         const octave = Math.floor(n.pitch / 12) - 1;
                         const semitone = n.pitch % 12;
                         const pitchInfo = PITCH_MAP[semitone];
                         const typeInfo = getNoteTypeAndDot(n.duration);
 
-                        // Перевод MIDI Velocity (0-127) в динамику процентами MusicXML (0-100%)
+                        // Перевод MIDI Velocity (0-127) в динамику MusicXML (0-100%)
                         const soundDynamics = Math.round((n.velocity / 127) * 100);
 
                         xml += `      <note>\n`;
@@ -229,7 +233,6 @@ function buildMusicXMLString(editor, customTitle) {
                             if (n.tieStart) xml += `          <tied type="start"/>\n`;
                             xml += `        </notations>\n`;
                         }
-                        // Запись Velocity в MusicXML
                         xml += `        <sound dynamics="${soundDynamics}"/>\n`;
                         xml += `      </note>\n`;
                     });
@@ -237,7 +240,17 @@ function buildMusicXMLString(editor, customTitle) {
                     measureCursor = t + maxDurationAtT;
                 });
 
-                // Пауза до конца такта, если каретка не дошла до конца
+                // Выравнивание каретки до самого дальнего момента звучания нот в такте
+                if (measureCursor < maxTimeInMeasure) {
+                    const fwdSlots = maxTimeInMeasure - measureCursor;
+                    const fwdDivs = fwdSlots * 6;
+                    xml += `      <forward>\n`;
+                    xml += `        <duration>${fwdDivs}</duration>\n`;
+                    xml += `      </forward>\n`;
+                    measureCursor = maxTimeInMeasure;
+                }
+
+                // Пауза до конца такта, если ни одна нота не звучит в конце такта
                 if (measureCursor < mEnd) {
                     const remSlots = mEnd - measureCursor;
                     const remDivs = remSlots * 6;
@@ -430,8 +443,13 @@ function importMusicXML(xmlString, editor) {
                                 currentMeasureDivs += noteDivs;
                             }
 
-                            const startSlot = measureStartSlot + Math.round((noteStartDivs / divisions) * 4);
-                            const durationSlots = Math.max(1, Math.round((noteDivs / divisions) * 4));
+                            // Точный расчёт позиций слотов с поддержкой произвольных длительностей
+                            const startSlotFloat = measureStartSlot + (noteStartDivs / divisions) * 4;
+                            const endSlotFloat = measureStartSlot + ((noteStartDivs + noteDivs) / divisions) * 4;
+
+                            const startSlot = Math.round(startSlotFloat);
+                            const endSlot = Math.round(endSlotFloat);
+                            const durationSlots = Math.max(1, endSlot - startSlot);
 
                             // Извлечение динамики / Velocity
                             let velocity = 100;
@@ -441,7 +459,6 @@ function importMusicXML(xmlString, editor) {
                             if (soundEl && soundEl.hasAttribute('dynamics')) {
                                 const dynAttr = parseFloat(soundEl.getAttribute('dynamics'));
                                 if (!isNaN(dynAttr)) {
-                                    // Перевод из процентов (0-100%) в MIDI Velocity (0-127)
                                     velocity = dynAttr <= 100 ? Math.round((dynAttr / 100) * 127) : Math.min(127, Math.round(dynAttr));
                                 }
                             } else {
@@ -461,16 +478,27 @@ function importMusicXML(xmlString, editor) {
                             }
 
                             const isTieStop = child.querySelector('tie[type="stop"]') !== null || 
-                                              child.querySelector('tied[type="stop"]') !== null;
+                                              child.querySelector('tied[type="stop"]') !== null ||
+                                              child.querySelector('tied[type="continue"]') !== null;
 
                             const currentTrackNotes = editor.tracks[trackId];
                             let merged = false;
 
-                            // Если нота является продолжением лиги из прошлого такта
+                            // Если нота является продолжением лиги из прошлых тактов
                             if (isTieStop && currentTrackNotes.length > 0) {
-                                const existing = currentTrackNotes.find(n => 
-                                    n.pitch === pitch && (n.start + n.duration) === startSlot
-                                );
+                                let existing = null;
+                                for (let i = currentTrackNotes.length - 1; i >= 0; i--) {
+                                    const candidate = currentTrackNotes[i];
+                                    if (candidate.pitch === pitch) {
+                                        const candEnd = candidate.start + candidate.duration;
+                                        // Допускаем допущение ±2 слота на погрешности округления
+                                        if (Math.abs(candEnd - startSlot) <= 2) {
+                                            existing = candidate;
+                                            break;
+                                        }
+                                    }
+                                }
+
                                 if (existing) {
                                     existing.duration += durationSlots;
                                     merged = true;
