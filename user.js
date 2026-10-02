@@ -52,12 +52,14 @@ class UserService {
         this.currentUser = JSON.parse(localStorage.getItem('app_user')) || null;
         this.cachedTasks = [];
         this.cachedUserProjects = [];
+        this.cachedSubmissions = [];
         this.currentTaskId = ''; // Храним task_id открытого задания
     }
 
     init() {
         this.updateUI();
         this.bindEvents();
+        this.ensureUserTasksModal();
         // Фоновая предзагрузка заданий и личных работ при запуске приложения
         this.preloadData();
     }
@@ -103,6 +105,33 @@ class UserService {
 
         document.querySelectorAll('.game-btn').forEach(btn => {
             btn.addEventListener('click', (e) => this.handleGameClick(e.target.dataset.type));
+        });
+    }
+
+    // Создание модального окна просмотра заданий ученика поверх всех окон (в тёмном стиле)
+    ensureUserTasksModal() {
+        if (document.getElementById('userTasksModal')) return;
+
+        const modal = document.createElement('div');
+        modal.id = 'userTasksModal';
+        modal.style.cssText = 'display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(10, 12, 16, 0.8); backdrop-filter:blur(6px); z-index:99999; align-items:center; justify-content:center;';
+
+        modal.innerHTML = `
+            <div style="background:#1e222d; color:#e1e6ed; border:1px solid #2d3345; box-shadow:0 20px 50px rgba(0, 0, 0, 0.7); border-radius:12px; max-width:850px; width:92%; max-height:85vh; overflow-y:auto; padding:24px; position:relative; font-family:var(--font-main, sans-serif);">
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #2d3345; padding-bottom:12px; margin-bottom:16px;">
+                    <h3 id="user-tasks-modal-title" style="margin:0; font-size:18px; color:#ffffff; font-weight:600;">Список выполненных и отправленных работ</h3>
+                    <button id="btn-close-user-tasks" style="background:none; border:none; font-size:24px; cursor:pointer; color:#8c9ba5; line-height:1; transition:color 0.2s ease;">&times;</button>
+                </div>
+                <div id="user-tasks-table-container">
+                    <!-- Таблица работ -->
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        document.getElementById('btn-close-user-tasks')?.addEventListener('click', () => {
+            modal.style.display = 'none';
         });
     }
 
@@ -152,6 +181,7 @@ class UserService {
         console.log('[Auth] Выход из системы пользователя:', this.currentUser?.name);
         this.currentUser = null;
         this.cachedUserProjects = [];
+        this.cachedSubmissions = [];
         this.currentTaskId = '';
         localStorage.removeItem('app_user');
         this.updateUI();
@@ -454,122 +484,216 @@ class UserService {
         }
     }
 
-    // "Мой прогресс": разделение на выполненные, отправленные на доработку и невыполненные задания
-	async updateProgressAndAchievements(allTasks) {
-		const progressContainer = document.getElementById('progress-status-container');
-		const achievementsContainer = document.getElementById('achievements-container');
+    // "Мой прогресс": вывод только текстовых цифр и кнопки открытия отдельного модального окна
+    async updateProgressAndAchievements(allTasks) {
+        const progressContainer = document.getElementById('progress-status-container');
+        const achievementsContainer = document.getElementById('achievements-container');
 
-		if (!this.currentUser) {
-			if (progressContainer) progressContainer.innerHTML = '<em>Авторизуйтесь для просмотра прогресса</em>';
-			if (achievementsContainer) achievementsContainer.innerHTML = '<em>Авторизуйтесь для просмотра наград</em>';
-			return;
-		}
+        if (!this.currentUser) {
+            if (progressContainer) progressContainer.innerHTML = '<em>Авторизуйтесь для просмотра прогресса</em>';
+            if (achievementsContainer) achievementsContainer.innerHTML = '<em>Авторизуйтесь для просмотра наград</em>';
+            return;
+        }
 
-		try {
-			const response = await fetch(this.gasUrl, {
-				method: 'POST',
-				mode: 'cors',
-				redirect: 'follow',
-				headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-				body: JSON.stringify({ action: 'getUserProgress', userId: this.currentUser.id })
-			});
-			const data = await response.json();
-			
-			const completedTaskNames = data.completedTasks || [];
-			const revisionTaskNames = data.revisionTasks || [];
-			const userSubmissions = data.submissions || [];
+        try {
+            const response = await fetch(this.gasUrl, {
+                method: 'POST',
+                mode: 'cors',
+                redirect: 'follow',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({ action: 'getUserProgress', userId: this.currentUser.id })
+            });
+            const data = await response.json();
+            
+            const completedTaskNames = data.completedTasks || [];
+            const revisionTaskNames = data.revisionTasks || [];
+            this.cachedSubmissions = data.submissions || [];
 
-			// 1. Формируем taskItems ВНЕ блоков if, чтобы переменная была доступна везде
-			const taskItems = (allTasks || []).map(task => {
-				const taskName = task.name;
-				const taskId = task.id;
-				let status = 'pending'; // 'revision', 'pending', 'done'
+            const taskItems = (allTasks || []).map(task => {
+                const taskName = task.name;
+                const taskId = task.id;
+                let status = 'pending';
 
-				// Проверка по ID или Имени
-				if (completedTaskNames.includes(taskName) || (taskId && completedTaskNames.includes(taskId))) {
-					status = 'done';
-				} else if (revisionTaskNames.includes(taskName) || (taskId && revisionTaskNames.includes(taskId))) {
-					status = 'revision';
-				} else {
-					// Поиск в списке сданных работ ученика
-					const foundSub = userSubmissions.find(s => 
-						(s.taskId && taskId && s.taskId === taskId) || 
-						(s.taskName && (s.taskName === taskName || s.taskName.includes(taskName)))
-					);
+                if (completedTaskNames.includes(taskName) || (taskId && completedTaskNames.includes(taskId))) {
+                    status = 'done';
+                } else if (revisionTaskNames.includes(taskName) || (taskId && revisionTaskNames.includes(taskId))) {
+                    status = 'revision';
+                } else {
+                    const foundSub = this.cachedSubmissions.find(s => 
+                        (s.taskId && taskId && s.taskId === taskId) || 
+                        (s.taskName && (s.taskName === taskName || s.taskName.includes(taskName)))
+                    );
 
-					if (foundSub) {
-						const comp = String(foundSub.isCompleted).trim();
-						if (comp === '1') {
-							status = 'done';
-						} else if (comp === '-1') {
-							status = 'revision';
-						}
-					}
-				}
-				return { id: taskId, name: taskName, status };
-			});
+                    if (foundSub) {
+                        const comp = String(foundSub.isCompleted).trim();
+                        if (comp === '1') {
+                            status = 'done';
+                        } else if (comp === '-1') {
+                            status = 'revision';
+                        }
+                    }
+                }
+                return { id: taskId, name: taskName, status };
+            });
 
-			// 2. Сортировка по приоритету
-			const statusPriority = { 'revision': 1, 'pending': 2, 'done': 3 };
-			taskItems.sort((a, b) => statusPriority[a.status] - statusPriority[b.status]);
+            const doneCount = taskItems.filter(t => t.status === 'done').length;
+            const totalCount = (allTasks || []).length;
 
-			const doneCount = taskItems.filter(t => t.status === 'done').length;
+            // Рендер панели "Мой прогресс": только цифры и кнопка
+            if (progressContainer) {
+                let html = `<div class="progress-summary" style="margin-bottom:12px; font-weight:600; color:#e2e8f0; font-size:15px;">Выполнено ${doneCount} из ${totalCount} заданий</div>`;
+                html += `<button id="btn-open-user-tasks-modal" style="padding:8px 16px; background:#2196F3; color:#ffffff; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px; transition:background 0.2s;">📋 Просмотр заданий</button>`;
+                progressContainer.innerHTML = html;
 
-			// 3. Рендер списка "Мой прогресс"
-			if (progressContainer) {
-				let html = `<div class="progress-summary" style="margin-bottom:12px; font-weight:600; color:#e2e8f0;">Освоено ${doneCount} из ${allTasks.length} уроков</div>`;
-				html += `<ul class="progress-list" style="list-style:none; padding:0; margin:0; max-height:320px; overflow-y:auto;">`;
-				
-				taskItems.forEach(item => {
-					const { name, status } = item;
-					let iconHtml = '';
-					let badgeHtml = '';
+                document.getElementById('btn-open-user-tasks-modal')?.addEventListener('click', () => {
+                    this.openUserTasksModal();
+                });
+            }
 
-					if (status === 'done') {
-						iconHtml = '<span style="color: #4ade80; font-weight: bold; margin-right: 10px;">✓</span>';
-						badgeHtml = '<span style="font-size:12px; color:#4ade80; background:rgba(74,222,128,0.15); padding:2px 8px; border-radius:10px; margin-left:auto;">Выполнено</span>';
-					} else if (status === 'revision') {
-						iconHtml = '<span style="color: #f87171; font-weight: bold; margin-right: 10px;">✕</span>';
-						badgeHtml = '<span style="font-size:12px; color:#f87171; background:rgba(248,113,113,0.15); padding:2px 8px; border-radius:10px; margin-left:auto;">Доработать</span>';
-					} else {
-						iconHtml = '<span style="color: #94a3b8; font-weight: bold; margin-right: 10px;">○</span>';
-						badgeHtml = '<span style="font-size:12px; color:#94a3b8; background:rgba(148,163,184,0.15); padding:2px 8px; border-radius:10px; margin-left:auto;">Не выполнено</span>';
-					}
+            // Рендер наград / ачивок
+            if (achievementsContainer) {
+                let badgesHtml = '<div class="badges-grid">';
+                badgesHtml += `<div class="badge-card ${doneCount >= 1 ? 'unlocked' : 'locked'}">
+                    <div class="badge-icon">🎵</div>
+                    <div class="badge-title">Первый шаг</div>
+                </div>`;
+                badgesHtml += `<div class="badge-card ${doneCount >= 5 ? 'unlocked' : 'locked'}">
+                    <div class="badge-icon">🎼</div>
+                    <div class="badge-title">Знаток</div>
+                </div>`;
+                badgesHtml += `<div class="badge-card ${doneCount >= 10 ? 'unlocked' : 'locked'}">
+                    <div class="badge-icon">👑</div>
+                    <div class="badge-title">Маэстро</div>
+                </div>`;
+                badgesHtml += '</div>';
+                achievementsContainer.innerHTML = badgesHtml;
+            }
 
-					html += `<li class="progress-item ${status}" style="display:flex; align-items:center; padding:8px 6px; border-bottom:1px solid rgba(255,255,255,0.07);">
-						${iconHtml}
-						<span class="task-name" style="font-size:14px; color:${status === 'done' ? '#94a3b8' : '#f8fafc'}; text-decoration:${status === 'done' ? 'line-through' : 'none'};">${this.escapeHtml(name)}</span>
-						${badgeHtml}
-					</li>`;
-				});
+        } catch (e) {
+            console.error('[Progress] Не удалось обновить прогресс:', e);
+        }
+    }
 
-				html += '</ul>';
-				progressContainer.innerHTML = html;
-			}
+    // Открытие всплывающего окна со списком всех работ ученика
+    openUserTasksModal() {
+        this.ensureUserTasksModal();
 
-			// 4. Рендер наград / ачивок
-			if (achievementsContainer) {
-				let badgesHtml = '<div class="badges-grid">';
-				badgesHtml += `<div class="badge-card ${doneCount >= 1 ? 'unlocked' : 'locked'}">
-					<div class="badge-icon">🎵</div>
-					<div class="badge-title">Первый шаг</div>
-				</div>`;
-				badgesHtml += `<div class="badge-card ${doneCount >= 5 ? 'unlocked' : 'locked'}">
-					<div class="badge-icon">🎼</div>
-					<div class="badge-title">Знаток</div>
-				</div>`;
-				badgesHtml += `<div class="badge-card ${doneCount >= 10 ? 'unlocked' : 'locked'}">
-					<div class="badge-icon">👑</div>
-					<div class="badge-title">Маэстро</div>
-				</div>`;
-				badgesHtml += '</div>';
-				achievementsContainer.innerHTML = badgesHtml;
-			}
+        const modal = document.getElementById('userTasksModal');
+        const titleElem = document.getElementById('user-tasks-modal-title');
+        const tableContainer = document.getElementById('user-tasks-table-container');
 
-		} catch (e) {
-			console.error('[Progress] Не удалось обновить прогресс:', e);
-		}
-	}
+        if (titleElem && this.currentUser) {
+            titleElem.innerText = `Все работы ученика: ${this.currentUser.name}`;
+        }
+
+        const studentWorks = this.cachedSubmissions || [];
+
+        if (studentWorks.length === 0) {
+            tableContainer.innerHTML = '<div style="padding:20px; text-align:center; color:#94a3b8;">У вас пока нет сохраненных или сданных работ.</div>';
+        } else {
+            let tableHtml = `
+                <div id="student-history-table-container" style="overflow-x: auto; max-height: 60vh;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: left;">
+                        <thead>
+                            <tr>
+                                <th style="padding: 10px;">Название</th>
+                                <th style="padding: 10px;">Комм. ученика</th>
+                                <th style="padding: 10px;">Комм. учителя</th>
+                                <th style="padding: 10px; text-align: center;">Статус</th>
+                                <th style="padding: 10px; text-align: center;">Баллы</th>
+                                <th style="padding: 10px; text-align: center;">Награда</th>
+                                <th style="padding: 10px; text-align: center;">Действие</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            studentWorks.forEach((sub, idx) => {
+                const comp = String(sub.isCompleted).trim();
+                let statusText = '<span style="color:#f59e0b; font-weight:600;">На проверке</span>';
+                
+                if (comp === '1') {
+                    statusText = '<span style="color:#10b981; font-weight:600;">✔ Выполнено</span>';
+                } else if (comp === '-1') {
+                    statusText = '<span style="color:#ef4444; font-weight:600;">✖ Доработать</span>';
+                }
+
+                tableHtml += `
+                    <tr>
+                        <td style="padding: 10px;">${this.escapeHtml(sub.taskName || 'Без названия')}</td>
+                        <td style="padding: 10px; color:#94a3b8;">${this.escapeHtml(sub.userComment || '—')}</td>
+                        <td style="padding: 10px; color:#cbd5e1;">${this.escapeHtml(sub.teacherComment || '—')}</td>
+                        <td style="padding: 10px; text-align: center;">${statusText}</td>
+                        <td style="padding: 10px; text-align: center;">${sub.points !== undefined && sub.points !== '' ? sub.points + ' б.' : '—'}</td>
+                        <td style="padding: 10px; text-align: center;">${this.escapeHtml(sub.reward || '—')}</td>
+                        <td style="padding: 10px; text-align: center;">
+                            <button class="btn-open-work-file btn-load-user-work" data-index="${idx}" style="padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer;">Загрузить</button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tableHtml += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            tableContainer.innerHTML = tableHtml;
+
+            // Навешиваем события на кнопки загрузки работы
+            tableContainer.querySelectorAll('.btn-load-user-work').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const idx = e.target.getAttribute('data-index');
+                    if (idx === null || !this.cachedSubmissions[idx]) return;
+
+                    const sub = this.cachedSubmissions[idx];
+                    
+                    // 1. Ищем ID или URL файла во всех возможных свойствах объекта
+                    let rawUrlOrId = sub.fileUrl || 
+                                     sub.fileId || 
+                                     sub.driveUrl || 
+                                     sub.id || 
+                                     sub.file || 
+                                     sub.driveId || 
+                                     sub.file_id;
+
+                    // 2. Если поле файла пустое, пробуем найти файл по имени в кэше сохраненных проектов
+                    if (!rawUrlOrId && sub.taskName) {
+                        const foundProject = this.cachedUserProjects.find(p => p.name === sub.taskName || sub.taskName.includes(p.name));
+                        if (foundProject) {
+                            rawUrlOrId = foundProject.id || foundProject.fileId;
+                        }
+                    }
+
+                    // 3. Если всё еще не нашли, проверяем кэш общих заданий
+                    if (!rawUrlOrId && (sub.taskId || sub.taskName)) {
+                        const foundTask = this.cachedTasks.find(t => t.id === sub.taskId || t.name === sub.taskName);
+                        if (foundTask) {
+                            rawUrlOrId = foundTask.fileId || foundTask.id;
+                        }
+                    }
+
+                    if (!rawUrlOrId) {
+                        alert('У этой работы отсутствует прикрепленный файл или ссылка!');
+                        return console.error('[User] Поле файла пустое в объекте:', sub);
+                    }
+
+                    let fileId = rawUrlOrId;
+                    const match = String(rawUrlOrId).match(/\/d\/([a-zA-Z0-9_-]+)/) || 
+                                  String(rawUrlOrId).match(/id=([a-zA-Z0-9_-]+)/);
+                    if (match && match[1]) {
+                        fileId = match[1];
+                    }
+
+                    if (modal) modal.style.display = 'none';
+                    await this.applyFileToEditor(fileId);
+                });
+            });
+        }
+
+        if (modal) modal.style.display = 'flex';
+    }
 
     handleExerciseClick(type) {
         console.log(`[Exercise] Запущено упражнение: ${type}`);
