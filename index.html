@@ -6,12 +6,37 @@
     <link rel="stylesheet" href="style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
 </head>
 <body>
 
     <div id="app-container">
 	<header id="toolbar">
 		<div class="toolbar-center-container">
+		
+			<!-- HTML разметка верхнего меню Cubase -->
+			
+			<div class="cubase-navbar">
+				<div class="menu-dropdown-wrapper">
+					<button id="cubase-file-menu-btn" class="cubase-menu-btn">Файл ▼</button>
+					<div id="cubase-file-dropdown" class="cubase-dropdown-menu">
+						<div id="menu-item-save" class="dropdown-item">💾 Сохранить проект</div>
+						<div id="menu-item-clear" class="dropdown-item">🗑️ Очистить всё</div>
+						<div class="dropdown-divider"></div>
+						<div id="menu-item-import" class="dropdown-item">📥 Импорт (Открыть)</div>
+						<div class="dropdown-submenu-item">
+							<span>📤 Экспорт (Сохранить как)</span>
+							<div class="submenu">
+								<div id="menu-item-export-audio" class="dropdown-item">🎵 Экспорт аудио MP3</div>
+								<div id="menu-item-export-xml" class="dropdown-item">🎼 Экспорт MUSICXML</div>
+								<div id="menu-item-export-midi" class="dropdown-item">🎹 Экспорт MIDI</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		
+		
 			<div class="toolbar-left-1">
 				<div class="toolbar-group" id="group-history">
 					<button id="btn-undo">↶</button>
@@ -28,7 +53,7 @@
 				</div>
 			</div>
 			
-			<button id="btn-velocity-mode" class="toolbar-btn" title="Режим редактирования Velocity">🔊 Velocity</button>
+			<button id="btn-velocity-mode" class="toolbar-btn" title="Режим редактирования Velocity">🔊 Громкость</button>
 			<button id="btn-note-labels" class="toolbar-btn" title="Подпись нот">До / C</button>
 
 			<div class="toolbar-middle">
@@ -54,14 +79,16 @@
 						<option value="5/4">5/4</option>
 					</select>
 					<button id="btn-metronome">🕒</button>
-					<button id="btn-export-xml" title="Экспорт в MusicXML">Export</button>
-					<input type="file" id="input-import-xml" accept=".xml,.musicxml" style="display: none;">
-					<input type="text" id="track-title-input" value="Без автора и Без названия" placeholder="Название трека" style="background: #333; color: #fff; border: 1px solid #555; border-radius: 3px; padding: 3px 8px; font-size: 11px; width: 140px; text-align: center; margin: 0 5px;" />
-					<button id="btn-import-xml" title="Импорт в MusicXML">Import</button>
+					<!--<button id="btn-export-xml" title="Экспорт в MusicXML">Export</button> -->
+					<!--<button id="btn-import-xml" title="Импорт в MusicXML">Import</button> -->
 					
 					<!-- КНОПКИ АВТОРИЗАЦИИ И СТУДИИ -->
-					<button id="authModalBtn" class="toolbar-btn btn-auth">Авторизация</button>
 					<button id="btn-studio" class="toolbar-btn" style="display: none; background: #27ae60; color: white;">STUDIO</button>
+					<button id="authModalBtn" class="toolbar-btn btn-auth">Авторизация</button>
+					
+					<input type="file" id="input-import-xml" accept=".xml,.musicxml" style="display: none;">
+					<input type="text" id="track-title-input" value="Без автора и Без названия" placeholder="Название трека" style="background: #333; color: #fff; border: 1px solid #555; border-radius: 3px; padding: 3px 8px; font-size: 13px; width: 230px; text-align: center; margin: 0 5px;" />
+					
 				</div>
 			</div>
 		</div>
