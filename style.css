@@ -1334,3 +1334,67 @@ html, body {
     scrollbar-width: thin !important;
     scrollbar-color: #2d3345 #141721 !important;
 }
+
+<!-- CSS Стили меню Cubase -->
+<style>
+.cubase-navbar {
+    background: #1b1b1c;
+    border-bottom: 1px solid #333;
+    padding: 4px 12px;
+    display: flex;
+    align-items: center;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+.menu-dropdown-wrapper { position: relative; }
+.cubase-menu-btn {
+    background: #2b2b2c;
+    color: #e1e1e1;
+    border: 1px solid #444;
+    padding: 5px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+}
+.cubase-menu-btn:hover { background: #3a3a3c; }
+.cubase-dropdown-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background: #252526;
+    border: 1px solid #3c3c3c;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.6);
+    border-radius: 4px;
+    min-width: 220px;
+    z-index: 10000;
+    padding: 4px 0;
+}
+.cubase-dropdown-menu.show { display: block; }
+.dropdown-item {
+    padding: 8px 16px;
+    color: #ccc;
+    cursor: pointer;
+    font-size: 13px;
+}
+.dropdown-item:hover { background: #04395e; color: #fff; }
+.dropdown-divider { height: 1px; background: #3c3c3c; margin: 4px 0; }
+.dropdown-submenu-item {
+    position: relative;
+    padding: 8px 16px;
+    color: #ccc;
+    font-size: 13px;
+    cursor: pointer;
+}
+.dropdown-submenu-item:hover { background: #04395e; color: #fff; }
+.dropdown-submenu-item .submenu {
+    display: none;
+    position: absolute;
+    left: 100%;
+    top: 0;
+    background: #252526;
+    border: 1px solid #3c3c3c;
+    min-width: 200px;
+    border-radius: 4px;
+}
+.dropdown-submenu-item:hover .submenu { display: block; }
+</style>
