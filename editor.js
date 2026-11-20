@@ -13,6 +13,8 @@ const DAW_CONFIG = {
 
 const INSTRUMENT_TYPES = {
     'piano': { name: 'Piano', color: 0x4A90E2 },
+    //'flute': { name: 'Flute', color: 0x4CAF50 },
+    //'cello': { name: 'Cello', color: 0xE33569 }
 };
 
 // Константы наименований нот для подписей в пианоролле
@@ -54,9 +56,12 @@ class PianoRoll {
         this.resizeSide = null;
 
         this.harmonyManager = new HarmonyManager(this);
+
+        // Инициализация менеджеров
         this.keyboardManager = new KeyboardManager(this);
         this.chordManager = new ChordManager(this);
 
+        // Отрисовка и настройка
         this.setupDragAndDrop();
         this.initApp();
         this.initAudio();
@@ -64,19 +69,26 @@ class PianoRoll {
         this.setupListeners();
         this.updateGrid();
 
+        // Автоматическое центрирование на Первой октаве (C4) при старте
         this.scrollToFirstOctave();
 
-        this.noteLabelMode = 0;
+        this.noteLabelMode = 0; // 0 = Выкл, 1 = Латиница (C4), 2 = Русские (до)
         this.initToolbarButtons();
 
+        // Подсказка ноты при наведении мыши
         this.hoverTimer = null;
         this.hoveredNote = null;
         this.tooltipEl = null;
         this.initHoverTooltip();
 
+        // Список групп и состояние исчезающих плашек
         this.groups = [];
         this.groupCounter = 0;
+        this._groupHideTimers = {};
+        this._visibleGroupIds = new Set();
+        this._groupPixiOverlays = {};
 
+        // Контекстное меню и буфер обмена
         this.clipboard = null;
         this.contextMenuEl = null;
         this.contextMenuTarget = null;
@@ -84,17 +96,26 @@ class PianoRoll {
         this.harmonyAnalyzer = new HarmonyAnalyzer(this);
         this.initContextMenu();
 
-        // --- НОВЫЙ ФУНКЦИОНАЛ ИЗ ВЕРСИИ 2 ---
+        // Меню в стиле Cubase и автосохранение в кэш
         this.initCubaseMenu();
-        this.loadProjectFromCache();
+			 const isDictationStarted = (window.dictationManager && window.dictationManager.initDictationPageIfNeeded(this));
+			 if (!isDictationStarted) {
+				 this.loadProjectFromCache();
+			 }
+			 this.startAutoSaveTimer();
         this.startAutoSaveTimer();
 
+        // Первичный снимок состояния
         this.saveState();
     }
 
-    // --- СИСТЕМА СОХРАНЕНИЯ В КЭШ (LOCALSTORAGE) И ЭКСПОРТА ---
+    // --- СИСТЕМА СОХРАНЕНИЯ В КЭШ (LOCALSTORAGE) И МЕНЮ CUBASE ---
 
     getCurrentUserId() {
+        try {
+            const savedUser = JSON.parse(localStorage.getItem('app_user'));
+            if (savedUser && savedUser.id) return String(savedUser.id);
+        } catch (e) {}
         return localStorage.getItem('daw_auth_user_id') || 'guest_user';
     }
 
@@ -104,33 +125,37 @@ class PianoRoll {
         }, 60000);
     }
 
-// Вспомогательный метод для получения актуального названия с именем пользователя
     getFormattedProjectTitle() {
         let title = document.getElementById('track-title-input')?.value?.trim() || 'Без названия';
-        
-        // Получаем имя авторизованного пользователя
-        const currentUserName = (typeof currentUser !== 'undefined' && currentUser && currentUser.name) 
-            ? currentUser.name 
-            : (localStorage.getItem('daw_auth_user_name') || '');
+        let userName = '';
 
-        // Если имя есть и оно не "Гость"
-        if (currentUserName && currentUserName !== 'Гость') {
-            // Удаляем старое имя пользователя из начала, если оно уже там есть
-            if (title.startsWith(`${currentUserName} - `)) {
-                title = title.replace(`${currentUserName} - `, '');
+        if (typeof userService !== 'undefined' && userService && userService.currentUser && userService.currentUser.name) {
+            userName = userService.currentUser.name;
+        } else if (typeof currentUser !== 'undefined' && currentUser && currentUser.name) {
+            userName = currentUser.name;
+        } else {
+            try {
+                const savedUser = JSON.parse(localStorage.getItem('app_user'));
+                if (savedUser && savedUser.name) userName = savedUser.name;
+            } catch (e) {
+                userName = localStorage.getItem('daw_auth_user_name') || '';
             }
-            // Добавляем имя пользователя в начало
-            title = `${currentUserName} - ${title}`;
+        }
+
+        userName = userName ? userName.trim() : '';
+        if (userName && userName.toLowerCase() !== 'гость') {
+            if (title.startsWith(`${userName} - `)) {
+                title = title.replace(`${userName} - `, '');
+            }
+            title = `${userName} - ${title}`;
         }
 
         return title;
     }
-	
+
     exportLightweightProject() {
         const bpm = document.getElementById('input-bpm')?.value || 120;
         const timeSig = document.getElementById('select-time-sig')?.value || '4/4';
-        
-        // Используем единый метод
         const title = this.getFormattedProjectTitle();
 
         const cleanTracks = {};
@@ -167,29 +192,29 @@ class PianoRoll {
             groups: cleanGroups
         };
     }
+
     saveProjectToCache(isAutoSave = false) {
-		try {
-			const userId = this.getCurrentUserId();
-			const projectData = this.exportLightweightProject();
+        try {
+            const userId = this.getCurrentUserId();
+            const projectData = this.exportLightweightProject();
 
-			// 2. ДОБАВЛЕНО: Обновление текстового поля на форме полученным сгенерированным названием
-			const titleInput = document.getElementById('track-title-input');
-			if (titleInput && projectData.title) {
-				titleInput.value = projectData.title;
-			}
+            const titleInput = document.getElementById('track-title-input');
+            if (titleInput && projectData.title) {
+                titleInput.value = projectData.title;
+            }
 
-			const cacheKey = `daw_project_cache_${userId}`;
-			localStorage.setItem(cacheKey, JSON.stringify(projectData));
+            const cacheKey = `daw_project_cache_${userId}`;
+            localStorage.setItem(cacheKey, JSON.stringify(projectData));
 
-			if (!isAutoSave) {
-				alert('Проект успешно сохранен в кэше браузера!');
-			} else {
-				console.log(`[Autosave ${new Date().toLocaleTimeString()}] Проект сохранен.`);
-			}
-		} catch (e) {
-			console.error('Ошибка сохранения в localStorage:', e);
-		}
-	}
+            if (!isAutoSave) {
+                alert('Проект успешно сохранен в кэше браузера!');
+            } else {
+                console.log(`[Autosave ${new Date().toLocaleTimeString()}] Проект сохранен.`);
+            }
+        } catch (e) {
+            console.error('Ошибка сохранения в localStorage:', e);
+        }
+    }
 
     loadProjectFromCache() {
         try {
@@ -246,7 +271,7 @@ class PianoRoll {
             this.activeTrack = 'piano';
             this.renderInitialInstruments();
             this.renderNotes();
-            
+
             const userId = this.getCurrentUserId();
             localStorage.removeItem(`daw_project_cache_${userId}`);
         }
@@ -287,51 +312,48 @@ class PianoRoll {
         });
 
         document.getElementById('menu-item-import')?.addEventListener('click', () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.xml,.musicxml,.mid,.midi,.bin';
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.xml,.musicxml,.mid,.midi,.bin';
 
-    input.onchange = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
 
-        if (file.name.endsWith('.xml') || file.name.endsWith('.musicxml')) {
-            const reader = new FileReader();
-            reader.onload = (evt) => importMusicXML(evt.target.result, this);
-            reader.readAsText(file);
-        } else if (file.name.endsWith('.mid') || file.name.endsWith('.midi')) {
-            // === Чтение MIDI через ArrayBuffer ===
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-                try {
-                    const arrayBuffer = evt.target.result;
-                    if (typeof importMIDI === 'function') {
-                        // Передаем ArrayBuffer, а не сырой объект File
-                        importMIDI(arrayBuffer, this); 
-                    }
-                } catch (error) {
-                    console.error('Ошибка при парсинге MIDI:', error);
-                    alert('Не удалось прочитать MIDI-файл. Возможно, файл поврежден.');
+                if (file.name.endsWith('.xml') || file.name.endsWith('.musicxml')) {
+                    const reader = new FileReader();
+                    reader.onload = (evt) => importMusicXML(evt.target.result, this);
+                    reader.readAsText(file);
+                } else if (file.name.endsWith('.mid') || file.name.endsWith('.midi')) {
+                    const reader = new FileReader();
+                    reader.onload = (evt) => {
+                        try {
+                            const arrayBuffer = evt.target.result;
+                            if (typeof importMIDI === 'function') {
+                                importMIDI(arrayBuffer, this);
+                            }
+                        } catch (error) {
+                            console.error('Ошибка при парсинге MIDI:', error);
+                            alert('Не удалось прочитать MIDI-файл. Возможно, файл поврежден.');
+                        }
+                    };
+                    reader.readAsArrayBuffer(file);
+                } else {
+                    const reader = new FileReader();
+                    reader.onload = (evt) => {
+                        const arrayBuffer = evt.target.result;
+                        if (typeof importBinaryFile === 'function') {
+                            importBinaryFile(arrayBuffer, this);
+                        }
+                    };
+                    reader.readAsArrayBuffer(file);
                 }
             };
-            reader.readAsArrayBuffer(file);
-        } else {
-            // Чтение бинарного файла через ArrayBuffer
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-                const arrayBuffer = evt.target.result;
-                if (typeof importBinaryFile === 'function') {
-                    importBinaryFile(arrayBuffer, this);
-                }
-            };
-            reader.readAsArrayBuffer(file);
-        }
-    };
-    input.click();
-});
-	}
+            input.click();
+        });
+    }
 
-    // --- БАЗОВЫЕ МЕТОДЫ РЕДАКТОРА ---
+    // --- ЗУМ И ХОЛСТ ---
 
     zoom(zoomIn, isVertical = false, mouseX = 0, mouseY = 0) {
         const container = document.getElementById('editor-container');
@@ -386,6 +408,7 @@ class PianoRoll {
 
         if (this.app && this.app.renderer) {
             this.app.renderer.resize(totalWidth, totalHeight);
+
             if (this.app.view) {
                 this.app.view.style.width = `${totalWidth}px`;
                 this.app.view.style.height = `${totalHeight}px`;
@@ -399,11 +422,14 @@ class PianoRoll {
 
         const c4NoteIndex = (this.config.baseNote + this.config.numNotes - 1) - 60;
         const c4PixelY = c4NoteIndex * this.config.cellH;
+
         const containerHeight = container.clientHeight;
         const targetScrollTop = c4PixelY - (containerHeight / 2) + (this.config.cellH / 2);
 
         container.scrollTop = Math.max(0, targetScrollTop);
     }
+
+    // --- ИНСТРУМЕНТЫ И ТРЕКИ ---
 
     renderInitialInstruments() {
         const list = document.getElementById('instruments-list');
@@ -420,7 +446,7 @@ class PianoRoll {
     selectTrack(id) {
         this.switchToSingleNoteMode();
         document.querySelectorAll('.inst-item').forEach(b => b.classList.remove('active'));
-        
+
         const activeEl = document.querySelector(`.inst-item[data-type="${id}"]`);
         if (activeEl) activeEl.classList.add('active');
 
@@ -430,6 +456,10 @@ class PianoRoll {
         if (this.harmonyManager) {
             this.harmonyManager.muteSoundOnTrackChange();
         }
+		
+		if (window.dictationManager) {
+			 window.dictationManager.onTrackSelected(id, this);
+		}
 
         this.renderNotes();
     }
@@ -458,7 +488,7 @@ class PianoRoll {
         `;
 
         item.onclick = (e) => {
-            if (e.target.classList.contains('inst-color-picker') || 
+            if (e.target.classList.contains('inst-color-picker') ||
                 e.target.classList.contains('inst-name-input') ||
                 e.target.classList.contains('inst-vol-btn')) {
                 return;
@@ -477,22 +507,29 @@ class PianoRoll {
         volBtn.onwheel = (e) => {
             e.preventDefault();
             e.stopPropagation();
+
             const delta = e.deltaY < 0 ? 5 : -5;
             inst.volume = Math.max(0, Math.min(100, inst.volume + delta));
+
             if (inst.volume > 0 && inst.muted && e.deltaY < 0) {
                 inst.muted = false;
             }
+
             this.updateVolumeBtnUI(volBtn, item, inst);
             this.showVelocityTooltip(`Громкость: ${inst.volume}%`, e.clientX, e.clientY);
+
             clearTimeout(this.volTooltipTimer);
             this.volTooltipTimer = setTimeout(() => this.hideVelocityTooltip(), 800);
         };
 
-        volBtn.onmouseleave = () => this.hideVelocityTooltip();
+        volBtn.onmouseleave = () => {
+            this.hideVelocityTooltip();
+        };
 
         const nameSpan = item.querySelector('.inst-name');
         nameSpan.onclick = (e) => {
             e.stopPropagation();
+
             const currentName = nameSpan.innerText;
             const input = document.createElement('input');
             input.type = 'text';
@@ -621,7 +658,7 @@ class PianoRoll {
     }
 
     switchToSingleNoteMode() {
-        const singleBtn = document.querySelector('.chord-circle[data-chord="single"]') 
+        const singleBtn = document.querySelector('.chord-circle[data-chord="single"]')
                        || document.querySelector('[data-chord="single"]')
                        || document.querySelector('[data-chord="1"]')
                        || Array.from(document.querySelectorAll('.chord-circle, .chord-btn, .tri-btn')).find(el => el.innerText.trim() === '1');
@@ -683,6 +720,7 @@ class PianoRoll {
                         };
                         currentTrack.push(newNote);
                         newSelectedNotes.add(newNote);
+                        this.autoAddNoteToNearbyGroup(newNote);
                         previewPitches.push(targetPitch);
                     }
                 }
@@ -783,7 +821,9 @@ class PianoRoll {
                 }
 
                 const trackInst = this.instrumentTypes[trackKey];
-                if (trackInst && trackInst.muted) return;
+                if (trackInst && trackInst.muted) {
+                    return;
+                }
 
                 const trackVolumeFactor = trackInst ? (trackInst.volume ?? 100) / 100 : 1.0;
 
@@ -792,7 +832,7 @@ class PianoRoll {
                         const freq = Tone.Frequency(note.pitch, "midi").toNote();
                         const durationSec = Tone.Transport.toSeconds("16n") * note.duration;
                         const finalVel = ((note.velocity || 100) / 127) * trackVolumeFactor;
-                        
+
                         this.synth.triggerAttackRelease(freq, durationSec, time, finalVel);
                     }
                 });
@@ -820,8 +860,8 @@ class PianoRoll {
         const beats = parseInt(beatsStr) || 4;
         const beatType = parseInt(beatTypeStr) || 4;
 
-        const beatWidthPx = (16 / beatType) * this.config.cellW; 
-        const measureWidthPx = beats * beatWidthPx; 
+        const beatWidthPx = (16 / beatType) * this.config.cellW;
+        const measureWidthPx = beats * beatWidthPx;
 
         const snapStepSlots = this.getSnapStepSlots();
         const snapPx = snapStepSlots * this.config.cellW;
@@ -915,13 +955,14 @@ class PianoRoll {
 
             container.addEventListener('wheel', (e) => {
                 e.preventDefault();
+
                 const rect = container.getBoundingClientRect();
                 const mouseX = e.clientX - rect.left;
                 const mouseY = e.clientY - rect.top;
 
                 if (e.ctrlKey) {
                     const zoomIn = e.deltaY < 0;
-                    const isVertical = e.altKey; 
+                    const isVertical = e.altKey;
                     this.zoom(zoomIn, isVertical, mouseX, mouseY);
                     return;
                 }
@@ -932,6 +973,21 @@ class PianoRoll {
                     container.scrollTop += e.deltaY;
                 }
             }, { passive: false });
+
+            // Поддержка жестов для Safari (macOS / iPad)
+            container.addEventListener('gesturestart', (e) => {
+                e.preventDefault();
+            });
+
+            container.addEventListener('gesturechange', (e) => {
+                e.preventDefault();
+                const rect = container.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+
+                const zoomIn = e.scale > 1;
+                this.zoom(zoomIn, false, mouseX, mouseY);
+            });
         }
 
         window.addEventListener('resize', () => {
@@ -994,12 +1050,18 @@ class PianoRoll {
             e.currentTarget.classList.toggle('active', this.isMetronomeOn);
         });
 
-        this.bindEvent('btn-undo', 'click', () => this.undo());
-        this.bindEvent('btn-redo', 'click', () => this.redo());
+        this.bindEvent('btn-undo', 'click', () => {
+            this.undo();
+        });
+
+        this.bindEvent('btn-redo', 'click', () => {
+            this.redo();
+        });
 
         document.querySelectorAll('.dur-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 this.switchToSingleNoteMode();
+
                 document.querySelectorAll('.dur-btn').forEach(b => {
                     b.classList.remove('active');
                     if (b.dataset.baseText) b.innerText = b.dataset.baseText;
@@ -1009,12 +1071,14 @@ class PianoRoll {
                 this.baseDuration = parseFloat(e.currentTarget.dataset.dur);
                 this.selectedDuration = this.baseDuration;
                 this.hasDotted = false;
+
                 this.updateGrid();
             });
 
             btn.addEventListener('dblclick', (e) => {
                 e.preventDefault();
                 this.switchToSingleNoteMode();
+
                 const target = e.currentTarget;
 
                 if (!target.dataset.baseText) {
@@ -1037,14 +1101,25 @@ class PianoRoll {
                     this.hasDotted = true;
                     target.innerText = target.dataset.baseText + '.';
                 }
+
                 this.updateGrid();
             });
+        });
+
+        this.bindAll('.inst-square', 'click', (e) => {
+            this.switchToSingleNoteMode();
+            document.querySelectorAll('.inst-square').forEach(b => b.classList.remove('active'));
+            e.currentTarget.classList.add('active');
+            this.activeTrack = e.currentTarget.dataset.type;
+            this.selectedNotes.clear();
+            this.renderNotes();
         });
 
         this.bindEvent('add-inst-btn', 'click', () => {
             this.instrumentCounter++;
             const name = `Инструмент ${this.instrumentCounter}`;
             const id = 'inst_' + Date.now();
+
             const defaultColors = [0x9B59B6, 0xE67E22, 0x1ABC9C, 0xE74C3C, 0x34495E, 0xF1C40F, 0x2ECC71];
             const color = defaultColors[(this.instrumentCounter - 1) % defaultColors.length];
 
@@ -1055,29 +1130,56 @@ class PianoRoll {
             this.selectTrack(id);
         });
 
+        this.bindEvent('btn-export-xml', 'click', () => exportMusicXML(this));
+
+        this.bindEvent('btn-import-xml', 'click', () => {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.xml,.musicxml';
+
+            fileInput.onchange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (evt) => {
+                        importMusicXML(evt.target.result, this);
+                    };
+                    reader.readAsText(file);
+                }
+            };
+
+            fileInput.click();
+        });
+
+        // --- ОБРАБОТКА МЫШИ: КЛИКИ, ВЫДЕЛЕНИЕ И ГРУППОВОЙ ПЕРЕНОС ---
         this.app.view.onmousedown = async (e) => {
             const rect = this.app.view.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
+            // Проверка попадания в плашку любой из групп (только если группа сейчас отображается)
             const clickedOnBadge = this.groups.some(group => {
+                if (!this._visibleGroupIds || !this._visibleGroupIds.has(group.id)) return false;
+
                 const activeTrackNotes = this.tracks[this.activeTrack] || [];
                 const validNotes = group.notes.filter(n => activeTrackNotes.includes(n));
                 if (validNotes.length === 0) return false;
 
                 const minStart = Math.min(...validNotes.map(n => n.start));
-                const maxPitch = Math.max(...validNotes.map(n => n.pitch));
+                const firstNotes = validNotes.filter(n => n.start === minStart);
+                const topFirstNote = firstNotes.reduce((a, b) => (a.pitch >= b.pitch ? a : b), firstNotes[0]);
 
-                const x1 = minStart * this.config.cellW - 8;
-                const topNoteRowIndex = (this.config.numNotes - 1) - (maxPitch - this.config.baseNote);
-                const y1 = topNoteRowIndex * this.config.cellH - 6;
-                const badgeY = Math.max(2, y1 - 18 - 4);
+                const x1 = topFirstNote.start * this.config.cellW;
+                const firstRowIdx = (this.config.numNotes - 1) - (topFirstNote.pitch - this.config.baseNote);
+                const y1 = firstRowIdx * this.config.cellH;
+                const badgeY = Math.max(22, y1 - 18 - 4);
+                const textureY = Math.max(2, badgeY - 17 - 3);
 
-                return x >= x1 && x <= x1 + 200 && y >= badgeY && y <= badgeY + 18;
+                return x >= x1 && x <= x1 + 180 && y >= textureY && y <= badgeY + 18;
             });
 
             if (clickedOnBadge || e._badgeClicked) return;
-            
+
             await Tone.start();
 
             const timeSlot = Math.floor(x / this.config.cellW);
@@ -1091,7 +1193,7 @@ class PianoRoll {
 
             this.clearHoverTooltip();
 
-            if (e.button === 0) {
+            if (e.button === 0) { // ЛКМ
                 if (foundNote) {
                     if (!this.selectedNotes.has(foundNote)) {
                         if (!e.shiftKey) this.selectedNotes.clear();
@@ -1128,6 +1230,7 @@ class PianoRoll {
                         this.saveState();
                         this.resizingNote = foundNote;
                         this.resizeSide = isRightEdge ? 'right' : 'left';
+
                         this.resizeStartData = {
                             startSlot: timeSlot,
                             notes: Array.from(this.selectedNotes).map(n => ({
@@ -1160,8 +1263,9 @@ class PianoRoll {
                     this.selectionStart = { x, y };
                     this.selectionGraphics.clear();
                 }
-            } else if (e.button === 2) {
+            } else if (e.button === 2) { // ПКМ
                 e.preventDefault();
+
                 if (foundNote) {
                     if (!this.selectedNotes.has(foundNote)) {
                         this.selectedNotes.clear();
@@ -1174,14 +1278,17 @@ class PianoRoll {
                 }
             }
 
-            if (e.detail === 2 && foundNote) { 
+            // Удаление нот двойным кликом ЛКМ
+            if (e.detail === 2 && foundNote) {
                 this.saveState();
+
                 if (this.selectedNotes.has(foundNote)) {
                     this.selectedNotes.forEach(note => this.removeNoteObject(note));
                     this.selectedNotes.clear();
                 } else {
                     this.removeNoteObject(foundNote);
                 }
+
                 this.renderNotes();
                 return;
             }
@@ -1195,6 +1302,7 @@ class PianoRoll {
             if (this.isSelecting || this.isMultiDragging || this.resizingNote) {
                 this.clearHoverTooltip();
 
+                // 1. Рамка выделения
                 if (this.isSelecting) {
                     const dx = Math.abs(x - this.selectionStart.x);
                     const dy = Math.abs(y - this.selectionStart.y);
@@ -1230,6 +1338,7 @@ class PianoRoll {
                     return;
                 }
 
+                // 2. Групповое перемещение выделенных нот
                 if (this.isMultiDragging) {
                     const currentTimeSlot = Math.floor(x / this.config.cellW);
                     const currentPitch = this.config.baseNote + (this.config.numNotes - 1 - Math.floor(y / this.config.cellH));
@@ -1265,11 +1374,12 @@ class PianoRoll {
                     if (pitchChanged) {
                         this.playNotePreview(currentPitch);
                     }
-                    
+
                     this.renderNotes();
                     return;
                 }
 
+                // 3. Групповое изменение длительности
                 if (this.resizingNote && this.resizeStartData) {
                     const currentTimeSlot = Math.floor(x / this.config.cellW);
                     const snapStepSlots = this.getSnapStepSlots();
@@ -1280,7 +1390,9 @@ class PianoRoll {
                     if (this.resizeSide === 'right') {
                         let canResize = true;
                         this.resizeStartData.notes.forEach(item => {
-                            if (item.originalDuration + snappedDiff < 1) canResize = false;
+                            if (item.originalDuration + snappedDiff < 1) {
+                                canResize = false;
+                            }
                         });
 
                         if (canResize) {
@@ -1293,7 +1405,9 @@ class PianoRoll {
                         this.resizeStartData.notes.forEach(item => {
                             const newStart = item.originalStart + snappedDiff;
                             const newDuration = item.originalDuration - snappedDiff;
-                            if (newStart < 0 || newDuration < 1) canResize = false;
+                            if (newStart < 0 || newDuration < 1) {
+                                canResize = false;
+                            }
                         });
 
                         if (canResize) {
@@ -1309,6 +1423,7 @@ class PianoRoll {
                 }
             }
 
+            // Подсказка при наведении на ноту и автопоказ подписей группы
             const timeSlot = Math.floor(x / this.config.cellW);
             const noteIndex = Math.floor(y / this.config.cellH);
             const pitch = this.config.baseNote + (this.config.numNotes - 1 - noteIndex);
@@ -1319,11 +1434,21 @@ class PianoRoll {
             );
 
             if (foundNote) {
+                // Показываем вспомогательные подписи группы (название, склад, анализ лада)
+                if (this.groups && this.groups.length > 0) {
+                    const hoveredGroup = this.groups.find(g => g.notes && g.notes.includes(foundNote));
+                    if (hoveredGroup) {
+                        this.revealGroupUI(hoveredGroup.id, 2500);
+                    }
+                }
+
                 if (this.hoveredNote !== foundNote) {
                     this.clearHoverTooltip();
                     this.hoveredNote = foundNote;
+
                     const cursorX = e.clientX;
                     const cursorY = e.clientY;
+
                     this.hoverTimer = setTimeout(() => {
                         this.showHoverTooltip(foundNote, cursorX, cursorY);
                     }, 1000);
@@ -1332,11 +1457,13 @@ class PianoRoll {
                 this.clearHoverTooltip();
             }
 
+            // Изменение Velocity перетягиванием мыши вверх/вниз
             if (this.isChangingVelocity && this.velocityStartData) {
                 const deltaY = this.velocityStartData.startY - e.clientY;
                 const velChange = Math.round(deltaY / 1);
 
                 let lastVelPercent = 0;
+
                 this.velocityStartData.notes.forEach(item => {
                     const newVel = Math.max(1, Math.min(127, item.originalVel + velChange));
                     item.note.velocity = newVel;
@@ -1382,6 +1509,8 @@ class PianoRoll {
         };
     }
 
+    // --- ИСТОРИЯ ДЕЙСТВИЙ (UNDO / REDO) ---
+
     saveState() {
         if (this.historyIndex < this.history.length - 1) {
             this.history = this.history.slice(0, this.historyIndex + 1);
@@ -1412,6 +1541,7 @@ class PianoRoll {
 
     applyState(state) {
         if (!state) return;
+
         this.tracks = JSON.parse(JSON.stringify(state.tracks || {}));
         this.groups = JSON.parse(JSON.stringify(state.groups || []));
         this.relinkGroupNotes();
@@ -1419,23 +1549,65 @@ class PianoRoll {
         if (this.selectedNotes) {
             this.selectedNotes.clear();
         }
+
         this.renderNotes();
     }
 
     relinkGroupNotes() {
         if (!this.groups || !this.tracks) return;
+
         const allCurrentNotes = Object.values(this.tracks).flat();
 
         this.groups.forEach(group => {
             if (!group.notes) return;
+
             group.notes = group.notes.map(savedNote => {
-                return allCurrentNotes.find(n => 
-                    n.pitch === savedNote.pitch && 
-                    n.start === savedNote.start && 
+                return allCurrentNotes.find(n =>
+                    n.pitch === savedNote.pitch &&
+                    n.start === savedNote.start &&
                     n.duration === savedNote.duration
                 ) || savedNote;
             });
         });
+    }
+
+    // --- ОПЕРАЦИИ С НОТАМИ И АВТОДОБАВЛЕНИЕ В ГРУППЫ ---
+
+    /**
+     * Автоматически добавляет новую ноту в существующую группу активного трека,
+     * если она попадает в её границы или достаточно близко к ней.
+     */
+    autoAddNoteToNearbyGroup(newNote) {
+        if (!this.groups || this.groups.length === 0 || !newNote) return;
+
+        const activeTrackNotes = this.tracks[this.activeTrack] || [];
+        const tMargin = 4; // Допуск по времени: 4 слота (1 четверть)
+        const pMargin = 5; // Допуск по высоте: 5 полутонов (кварта)
+
+        const noteStart = newNote.start;
+        const noteEnd = newNote.start + newNote.duration;
+        const notePitch = newNote.pitch;
+
+        for (const group of this.groups) {
+            const validNotes = group.notes.filter(n => activeTrackNotes.includes(n));
+            if (validNotes.length === 0) continue;
+
+            const minStart = Math.min(...validNotes.map(n => n.start));
+            const maxEnd = Math.max(...validNotes.map(n => n.start + n.duration));
+            const minPitch = Math.min(...validNotes.map(n => n.pitch));
+            const maxPitch = Math.max(...validNotes.map(n => n.pitch));
+
+            const isTimeClose = noteStart <= (maxEnd + tMargin) && noteEnd >= (minStart - tMargin);
+            const isPitchClose = notePitch >= (minPitch - pMargin) && notePitch <= (maxPitch + pMargin);
+
+            if (isTimeClose && isPitchClose) {
+                if (!group.notes.includes(newNote)) {
+                    group.notes.push(newNote);
+                }
+                this.revealGroupUI(group.id, 3000);
+                break;
+            }
+        }
     }
 
     addNote(pitch, start) {
@@ -1448,43 +1620,16 @@ class PianoRoll {
             this.tracks[this.activeTrack] = [];
         }
 
-        const newNote = { 
-            pitch, 
-            start, 
-            duration: durationSlots, 
+        const newNote = {
+            pitch,
+            start,
+            duration: durationSlots,
             dotted: !!this.hasDotted,
             velocity: 70
         };
 
         this.tracks[this.activeTrack].push(newNote);
-
-        if (this.groups && Array.isArray(this.groups)) {
-            const activeGroups = this.groups.filter(g => 
-                g.trackIndex === undefined || g.trackIndex === this.activeTrack
-            );
-
-            activeGroups.forEach(group => {
-                if (!group.notes || group.notes.length === 0) return;
-
-                const minStart = Math.min(...group.notes.map(n => n.start));
-                const maxEnd = Math.max(...group.notes.map(n => n.start + n.duration));
-                const minPitch = Math.min(...group.notes.map(n => n.pitch));
-                const maxPitch = Math.max(...group.notes.map(n => n.pitch));
-
-                const tMargin = 1; 
-                const pMargin = 1;
-                const noteEnd = start + durationSlots;
-
-                const isPitchClose = pitch >= (minPitch - pMargin) && pitch <= (maxPitch + pMargin);
-                const isTimeClose = start <= (maxEnd + tMargin) && noteEnd >= (minStart - tMargin);
-
-                if (isPitchClose && isTimeClose) {
-                    if (!group.notes.includes(newNote)) {
-                        group.notes.push(newNote);
-                    }
-                }
-            });
-        }
+        this.autoAddNoteToNearbyGroup(newNote);
 
         this.renderNotes();
         this.playNotePreview(pitch, 100);
@@ -1503,21 +1648,77 @@ class PianoRoll {
         this.tracks[this.activeTrack] = this.tracks[this.activeTrack].filter(n => n !== noteObj);
     }
 
+    playChordPreview(chord) {
+        const chordPitches = {
+            'A': ["A3", "C#4", "E4"],
+            'A7': ["A3", "C#4", "E4", "G4"],
+            'A9': ["A3", "C#4", "E4", "G4", "B4"]
+        };
+        const notes = chordPitches[chord] || ["A3", "C#4", "E4"];
+        this.synth.triggerAttackRelease(notes, "0.5s");
+    }
+
+    // --- УПРАВЛЕНИЕ ИСЧЕЗАЮЩИМИ ПОДПИСЯМИ ГРУПП ---
+
+    /**
+     * Показывает вспомогательные элементы группы (склад, название, панель лада)
+     * и скрывает их с задержкой после отведения курсора.
+     */
+    revealGroupUI(groupId, delayMs = 2500) {
+        if (!this._groupHideTimers) this._groupHideTimers = {};
+        if (!this._visibleGroupIds) this._visibleGroupIds = new Set();
+
+        this._visibleGroupIds.add(groupId);
+
+        if (this._groupHideTimers[groupId]) {
+            clearTimeout(this._groupHideTimers[groupId]);
+        }
+
+        const pixiOverlays = this._groupPixiOverlays?.[groupId];
+        if (pixiOverlays) {
+            pixiOverlays.forEach(el => { el.alpha = 1; });
+        }
+
+        const htmlCard = document.querySelector(`.group-harmony-analysis-card[data-group-id="${groupId}"]`);
+        if (htmlCard) {
+            htmlCard.classList.add('visible');
+        }
+
+        this._groupHideTimers[groupId] = setTimeout(() => {
+            this._visibleGroupIds.delete(groupId);
+
+            const currentPixi = this._groupPixiOverlays?.[groupId];
+            if (currentPixi) {
+                currentPixi.forEach(el => { el.alpha = 0; });
+            }
+
+            const currentHtml = document.querySelector(`.group-harmony-analysis-card[data-group-id="${groupId}"]`);
+            if (currentHtml) {
+                currentHtml.classList.remove('visible');
+            }
+        }, delayMs);
+    }
+
+    // --- ОСНОВНАЯ ОТРИСОВКА (НОТЫ, КОНТУРНОЕ СВЕЧЕНИЕ, СВЯЗКИ, СКЛАД И ГАРМОНИЯ) ---
+
     renderNotes() {
         this.updateGridSize();
         this.notesLayer.removeChildren();
 
         const harmonyHighlightGraphics = new PIXI.Graphics();
         const bgGraphics = new PIXI.Graphics();
+        const groupLinksGraphics = new PIXI.Graphics(); // Слой контурного свечения и связок (ЗА нотами)
         const activeGraphics = new PIXI.Graphics();
 
         this.notesLayer.addChild(harmonyHighlightGraphics);
         this.notesLayer.addChild(bgGraphics);
+        this.notesLayer.addChild(groupLinksGraphics);
         this.notesLayer.addChild(activeGraphics);
 
         const harmonyNotes = this.tracks['harmony'] || [];
         const chordBlocks = this.groupHarmonyNotesIntoChords(harmonyNotes);
 
+        // 1. Подсветка и подписи аккордов гармонии
         if (chordBlocks.length > 0) {
             const totalHeight = this.config.numNotes * this.config.cellH;
 
@@ -1549,6 +1750,7 @@ class PianoRoll {
             this.harmonyManager.renderChordBoxes(chordBlocks);
         }
 
+        // 2. Отрисовка неактивных треков
         Object.keys(this.tracks).forEach(trackKey => {
             if (trackKey === this.activeTrack) return;
 
@@ -1565,8 +1767,14 @@ class PianoRoll {
                 bgGraphics.drawRoundedRect(x + 1, y + 1, w - 2, this.config.cellH - 2, 3);
                 bgGraphics.endFill();
             });
+			
+			// В режиме диктанта скрываем эталонный трек "Проверить ответ", пока он не активирован
+			 if (trackKey === 'dict_answer' && window.dictationManager && !window.dictationManager.isChecked) {
+				 return;
+			 }
         });
 
+        // 3. Отрисовка активного трека
         const activeTrackConfig = this.instrumentTypes[this.activeTrack] || { color: 0x4A90E2 };
         const activeNotes = this.tracks[this.activeTrack] || [];
 
@@ -1577,30 +1785,38 @@ class PianoRoll {
 
             const isSelected = this.selectedNotes && this.selectedNotes.has(n);
             const noteVel = n.velocity || 100;
-            
+
             const parentGroup = this.groups ? this.groups.find(g => g.notes.includes(n)) : null;
 
             let fillColor;
-            if (parentGroup && parentGroup.analysisEnabled && this.harmonyAnalyzer) {
+            if (this.isVelocityMode) {
+                // При включенной кнопке "Громкость" — приоритет цветовой индикации Velocity
+                fillColor = this.getVelocityColor(noteVel);
+            } else if (parentGroup && parentGroup.analysisEnabled && this.harmonyAnalyzer) {
                 fillColor = this.harmonyAnalyzer.getNoteColorInScale(
-                    n.pitch, 
-                    parentGroup.analysisRoot, 
+                    n.pitch,
+                    parentGroup.analysisRoot,
                     parentGroup.analysisScale
                 );
-            } else if (this.isVelocityMode) {
-                fillColor = this.getVelocityColor(noteVel);
             } else if (isSelected) {
                 fillColor = 0x72B0FF;
             } else {
                 fillColor = activeTrackConfig.color;
             }
 
-            if (this.harmonyManager && this.harmonyManager.isHighlightActive) {
+            if (!this.isVelocityMode && this.harmonyManager && this.harmonyManager.isHighlightActive) {
                 const isHarmonic = this.harmonyManager.isHarmonicAtSlot(n.pitch, n.start, chordBlocks);
                 if (!isHarmonic) {
                     fillColor = 0xE74C3C;
                 }
             }
+			
+			//Подкрашиваем красно-зеленым ноты при проверке диктанта
+			if (window.dictationManager && window.dictationManager.isDictationMode && window.dictationManager.isChecked) {
+				const checkRes = window.dictationManager.noteCheckResults.get(n);
+				if (checkRes === 'correct') fillColor = 0x2ECC71;
+				else if (checkRes === 'wrong') fillColor = 0xE74C3C;
+			}
 
             const lineWidth = isSelected ? 2 : 1;
             const lineColor = 0xffffff;
@@ -1612,35 +1828,42 @@ class PianoRoll {
             activeGraphics.endFill();
 
             const labelStr = this.getNoteLabelText(n.pitch);
-            if (labelStr && w >= 16) {
-                const fontSize = Math.max(9, Math.min(12, Math.floor(this.config.cellH * 0.55)));
-                const pixiText = new PIXI.Text(labelStr, {
-                    fontFamily: 'system-ui, -apple-system, sans-serif',
-                    fontSize: fontSize,
-                    fontWeight: '700',
-                    fill: 0xFFFFFF,
-                    stroke: 0x000000,
-                    strokeThickness: 2,
-                    lineJoin: 'round',
-                    align: 'left'
-                });
+            if (labelStr) {
+                const minNoteWidthToDraw = 16;
 
-                pixiText.resolution = Math.max(2, window.devicePixelRatio || 1);
+                if (w >= minNoteWidthToDraw) {
+                    const fontSize = Math.max(9, Math.min(12, Math.floor(this.config.cellH * 0.55)));
 
-                if (pixiText.width <= w - 4) {
-                    pixiText.x = Math.round(x + 4);
-                    pixiText.y = Math.round(y + (this.config.cellH - pixiText.height) / 2);
-                    this.notesLayer.addChild(pixiText);
+                    const pixiText = new PIXI.Text(labelStr, {
+                        fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
+                        fontSize: fontSize,
+                        fontWeight: '700',
+                        fill: 0xFFFFFF,
+                        stroke: 0x000000,
+                        strokeThickness: 2,
+                        lineJoin: 'round',
+                        align: 'left'
+                    });
+
+                    pixiText.resolution = Math.max(2, window.devicePixelRatio || 1);
+
+                    if (pixiText.width <= w - 4) {
+                        pixiText.x = Math.round(x + 4);
+                        pixiText.y = Math.round(y + (this.config.cellH - pixiText.height) / 2);
+
+                        this.notesLayer.addChild(pixiText);
+                    }
                 }
             }
         });
 
-        if (this.groups && this.groups.length > 0) {
-            const groupsGraphics = new PIXI.Graphics();
-            this.notesLayer.addChild(groupsGraphics);
+        // 4. Отрисовка контурного свечения, связок голосоведения и исчезающих плашек групп
+        this._groupPixiOverlays = {};
+        if (!this._visibleGroupIds) this._visibleGroupIds = new Set();
 
-            const paddingX = 2;
-            const paddingY = 2;
+        if (this.groups && this.groups.length > 0) {
+            // Цвет активного голоса/инструмента используется для свечения и нитей
+            const trackColor = activeTrackConfig.color || 0x4A90E2;
 
             this.groups.forEach(group => {
                 const activeTrackNotes = this.tracks[this.activeTrack] || [];
@@ -1649,29 +1872,137 @@ class PianoRoll {
                 if (validNotes.length === 0) return;
 
                 const minStart = Math.min(...validNotes.map(n => n.start));
-                const maxEnd = Math.max(...validNotes.map(n => n.start + n.duration));
-                const minPitch = Math.min(...validNotes.map(n => n.pitch));
-                const maxPitch = Math.max(...validNotes.map(n => n.pitch));
+                const isGroupVisible = this._visibleGroupIds.has(group.id);
 
-                const x1 = minStart * this.config.cellW - paddingX;
-                const topNoteRowIndex = (this.config.numNotes - 1) - (maxPitch - this.config.baseNote);
-                const y1 = topNoteRowIndex * this.config.cellH - paddingY;
+                // Первая по времени нота (среди одновременных первых — самая верхняя)
+                const firstNotes = validNotes.filter(n => n.start === minStart);
+                const topFirstNote = firstNotes.reduce((a, b) => (a.pitch >= b.pitch ? a : b), firstNotes[0]);
 
-                const w = (maxEnd - minStart) * this.config.cellW + (paddingX * 2);
-                const h = (maxPitch - minPitch + 1) * this.config.cellH + (paddingY * 2);
+                const firstNoteX = topFirstNote.start * this.config.cellW;
+                const firstNoteRowIdx = (this.config.numNotes - 1) - (topFirstNote.pitch - this.config.baseNote);
+                const firstNoteY = firstNoteRowIdx * this.config.cellH;
 
-                groupsGraphics.beginFill(group.color, 0.15);
-                groupsGraphics.lineStyle(1.5, group.color, 0.6);
-                groupsGraphics.drawRoundedRect(x1, y1, w, h, 10);
-                groupsGraphics.endFill();
+                // 4.1. Плавное фоновое свечение по контуру крайних нот (остаётся всегда)
+                // СБРОС lineStyle(0) исправляет баг с появлением обводки у 2-й и следующих групп
+                groupLinksGraphics.lineStyle(0);
 
+                const sliceMap = new Map();
+                validNotes.forEach(n => {
+                    if (!sliceMap.has(n.start)) sliceMap.set(n.start, []);
+                    sliceMap.get(n.start).push(n);
+                });
+                const sortedSlices = Array.from(sliceMap.entries()).sort((a, b) => a[0] - b[0]);
+
+                if (sortedSlices.length > 0) {
+                    const topPoints = [];
+                    const bottomPoints = [];
+                    const glowPadY = Math.max(4, this.config.cellH * 0.35);
+                    const glowPadX = 6;
+
+                    sortedSlices.forEach(([startSlot, sNotes], idx) => {
+                        const sMaxPitch = Math.max(...sNotes.map(n => n.pitch));
+                        const sMinPitch = Math.min(...sNotes.map(n => n.pitch));
+                        const sMaxEnd = Math.max(...sNotes.map(n => n.start + n.duration));
+
+                        const topY = ((this.config.numNotes - 1) - (sMaxPitch - this.config.baseNote)) * this.config.cellH - glowPadY;
+                        const botY = ((this.config.numNotes - 1) - (sMinPitch - this.config.baseNote) + 1) * this.config.cellH + glowPadY;
+
+                        const xStart = startSlot * this.config.cellW - (idx === 0 ? glowPadX : 0);
+                        const xEnd = sMaxEnd * this.config.cellW + (idx === sortedSlices.length - 1 ? glowPadX : 0);
+                        const xMid = (xStart + xEnd) / 2;
+
+                        if (idx === 0) {
+                            topPoints.push({ x: xStart, y: topY });
+                            bottomPoints.push({ x: xStart, y: botY });
+                        }
+                        topPoints.push({ x: xMid, y: topY });
+                        bottomPoints.push({ x: xMid, y: botY });
+
+                        if (idx === sortedSlices.length - 1) {
+                            topPoints.push({ x: xEnd, y: topY });
+                            bottomPoints.push({ x: xEnd, y: botY });
+                        }
+                    });
+
+                    [
+                        { alpha: 0.08, pad: 6 },
+                        { alpha: 0.14, pad: 0 }
+                    ].forEach(layer => {
+                        groupLinksGraphics.beginFill(trackColor, layer.alpha);
+                        groupLinksGraphics.moveTo(topPoints[0].x - layer.pad, topPoints[0].y - layer.pad);
+
+                        for (let i = 0; i < topPoints.length - 1; i++) {
+                            const p0 = topPoints[i];
+                            const p1 = topPoints[i + 1];
+                            const midX = (p0.x + p1.x) / 2;
+                            groupLinksGraphics.bezierCurveTo(
+                                midX, p0.y - layer.pad,
+                                midX, p1.y - layer.pad,
+                                p1.x + (i === topPoints.length - 2 ? layer.pad : 0), p1.y - layer.pad
+                            );
+                        }
+
+                        const lastBot = bottomPoints[bottomPoints.length - 1];
+                        groupLinksGraphics.lineTo(lastBot.x + layer.pad, lastBot.y + layer.pad);
+
+                        for (let i = bottomPoints.length - 1; i > 0; i--) {
+                            const p0 = bottomPoints[i];
+                            const p1 = bottomPoints[i - 1];
+                            const midX = (p0.x + p1.x) / 2;
+                            groupLinksGraphics.bezierCurveTo(
+                                midX, p0.y + layer.pad,
+                                midX, p1.y + layer.pad,
+                                p1.x - (i === 1 ? layer.pad : 0), p1.y + layer.pad
+                            );
+                        }
+
+                        groupLinksGraphics.closePath();
+                        groupLinksGraphics.endFill();
+                    });
+                }
+
+                // 4.2. Связующие нити голосоведения (SATB) в отдельном графическом слое,
+                // чтобы они исчезали вместе с надписями при отведении курсора
+                const voiceData = (this.harmonyAnalyzer && typeof this.harmonyAnalyzer.analyzeGroupTextureAndVoiceLeading === 'function')
+                    ? this.harmonyAnalyzer.analyzeGroupTextureAndVoiceLeading(validNotes)
+                    : { texture: { label: '', color: trackColor }, edges: [] };
+
+                const edgesGraphics = new PIXI.Graphics();
+                edgesGraphics.alpha = isGroupVisible ? 1 : 0;
+
+                voiceData.edges.forEach(edge => {
+                    const fromX = (edge.from.start + edge.from.duration) * this.config.cellW;
+                    const fromY = ((this.config.numNotes - 1) - (edge.from.pitch - this.config.baseNote)) * this.config.cellH + (this.config.cellH / 2);
+
+                    const toX = edge.to.start * this.config.cellW;
+                    const toY = ((this.config.numNotes - 1) - (edge.to.pitch - this.config.baseNote)) * this.config.cellH + (this.config.cellH / 2);
+
+                    const startX = fromX > toX ? (edge.from.start + edge.from.duration * 0.5) * this.config.cellW : fromX;
+                    const dx = Math.max(18, Math.abs(toX - startX) * 0.5);
+
+                    // Мягкий ореол нити в цвет голоса
+                    edgesGraphics.lineStyle(5, trackColor, 0.16);
+                    edgesGraphics.moveTo(startX, fromY);
+                    edgesGraphics.bezierCurveTo(startX + dx, fromY, toX - dx, toY, toX, toY);
+
+                    // Основная нить голосоведения в цвет голоса
+                    edgesGraphics.lineStyle(2, trackColor, 0.55);
+                    edgesGraphics.moveTo(startX, fromY);
+                    edgesGraphics.bezierCurveTo(startX + dx, fromY, toX - dx, toY, toX, toY);
+			});
+
+                // Добавляем нити в groupLinksGraphics (чтобы оставались на фоне ЗА нотами)
+                groupLinksGraphics.addChild(edgesGraphics);
+				
+				// 4.3. Плашка "Группа нот #" — строго над первой верхней нотой группы
                 const badgeContainer = new PIXI.Container();
                 badgeContainer.eventMode = 'static';
                 badgeContainer.cursor = 'grab';
+                badgeContainer.alpha = isGroupVisible ? 1 : 0;
 
                 const badgePaddingX = 6;
                 const badgeHeight = 18;
-                const badgeY = Math.max(2, y1 - badgeHeight - 4);
+                const badgeY = Math.max(22, firstNoteY - badgeHeight - 4);
 
                 const labelText = new PIXI.Text(group.name, {
                     fontFamily: 'system-ui, -apple-system, sans-serif',
@@ -1684,8 +2015,8 @@ class PianoRoll {
                 const badgeWidth = labelText.width + (badgePaddingX * 2);
 
                 const badgeBg = new PIXI.Graphics();
-                badgeBg.beginFill(0x1E1E1E, 0.9);
-                badgeBg.lineStyle(1, group.color, 0.8);
+                badgeBg.beginFill(0x1E1E1E, 0.92);
+                badgeBg.lineStyle(1, trackColor, 0.85);
                 badgeBg.drawRoundedRect(0, 0, badgeWidth, badgeHeight, 4);
                 badgeBg.endFill();
 
@@ -1695,13 +2026,19 @@ class PianoRoll {
                 labelText.y = (badgeHeight - labelText.height) / 2;
                 badgeContainer.addChild(labelText);
 
-                badgeContainer.x = x1;
+                badgeContainer.x = firstNoteX;
                 badgeContainer.y = badgeY;
+
+                // При наведении на плашку группы — удерживаем все подписи группы видимыми
+                badgeContainer.on('pointerover', () => this.revealGroupUI(group.id, 3000));
+                badgeContainer.on('pointermove', () => this.revealGroupUI(group.id, 3000));
 
                 let lastClickTime = 0;
                 badgeContainer.on('pointerdown', (e) => {
                     e.stopPropagation();
+                    this.revealGroupUI(group.id, 3000);
                     const origEvt = e.data.originalEvent;
+
                     origEvt._badgeClicked = true;
                     if (origEvt.button !== 0) return;
 
@@ -1744,15 +2081,142 @@ class PianoRoll {
                 });
 
                 this.notesLayer.addChild(badgeContainer);
+                this._groupPixiOverlays[group.id] = [badgeContainer];
+
+                // 4.4. Плашка типа склада ("Мелодия" / "Аккорды") — строго НАД плашкой "Группа нот #"
+                if (voiceData.texture && voiceData.texture.label) {
+                    const textureText = new PIXI.Text(voiceData.texture.label, {
+                        fontFamily: 'system-ui, -apple-system, sans-serif',
+                        fontSize: 10,
+                        fontWeight: '600',
+                        fill: 0xFFFFFF
+                    });
+                    textureText.resolution = Math.max(2, window.devicePixelRatio || 1);
+
+                    const tPadX = 6;
+                    const tHeight = 17;
+                    const tWidth = textureText.width + tPadX * 2;
+
+                    const textureBg = new PIXI.Graphics();
+                    textureBg.beginFill(0x181B22, 0.92);
+                    textureBg.lineStyle(1, trackColor, 0.75);
+                    textureBg.drawRoundedRect(0, 0, tWidth, tHeight, 4);
+                    textureBg.endFill();
+
+                    const textureContainer = new PIXI.Container();
+                    textureContainer.eventMode = 'static';
+                    textureContainer.alpha = isGroupVisible ? 1 : 0;
+
+                    textureContainer.addChild(textureBg);
+                    textureText.x = tPadX;
+                    textureText.y = (tHeight - textureText.height) / 2;
+                    textureContainer.addChild(textureText);
+
+                    // Размещаем непосредственно над плашкой названия группы
+                    textureContainer.x = firstNoteX;
+                    textureContainer.y = Math.max(2, badgeY - tHeight - 3);
+
+                    textureContainer.on('pointerover', () => this.revealGroupUI(group.id, 3000));
+
+                    this.notesLayer.addChild(textureContainer);
+                    this._groupPixiOverlays[group.id].push(textureContainer);
+                }
+				
+                    });
+		}
+
+
+        // 5. HTML-карточки гармонического анализа групп (исчезающие, с удержанием при наведении)
+        const container = document.getElementById('editor-container');
+        let analysisBoxContainer = document.getElementById('group-analysis-boxes');
+        if (container && !analysisBoxContainer) {
+            analysisBoxContainer = document.createElement('div');
+            analysisBoxContainer.id = 'group-analysis-boxes';
+            analysisBoxContainer.className = 'group-analysis-boxes-layer';
+            container.appendChild(analysisBoxContainer);
+        }
+        if (analysisBoxContainer) {
+            analysisBoxContainer.innerHTML = '';
+        }
+
+        if (this.groups && this.groups.length > 0 && analysisBoxContainer) {
+            this.groups.forEach(group => {
+                const activeTrackNotes = this.tracks[this.activeTrack] || [];
+                const validNotes = group.notes.filter(n => activeTrackNotes.includes(n));
+                if (validNotes.length === 0) return;
+
+                if (group.analysisRoot === undefined && this.harmonyAnalyzer) {
+                    const detected = this.harmonyAnalyzer.analyzeHarmony(validNotes);
+                    group.analysisRoot = detected.root;
+                    group.analysisScale = detected.scaleKey;
+                    group.analysisEnabled = true;
+                }
+
+                const minStart = Math.min(...validNotes.map(n => n.start));
+                const minPitch = Math.min(...validNotes.map(n => n.pitch));
+
+                const paddingX = 2;
+                const paddingY = 4;
+
+                const bottomNoteRowIndex = (this.config.numNotes - 1) - (minPitch - this.config.baseNote);
+                const leftPx = (minStart * this.config.cellW) - paddingX + this.app.view.offsetLeft;
+                const topPx = (bottomNoteRowIndex + 1) * this.config.cellH + paddingY;
+
+                const boxEl = document.createElement('div');
+                const isGroupVisible = this._visibleGroupIds.has(group.id);
+                boxEl.className = `group-harmony-analysis-card ${isGroupVisible ? 'visible' : ''}`;
+                boxEl.dataset.groupId = group.id;
+                boxEl.style.position = 'absolute';
+                boxEl.style.left = `${Math.max(4, leftPx)}px`;
+                boxEl.style.top = `${topPx}px`;
+
+                // При наведении или взаимодействии с селекторами тона/лада удерживаем подписи открытыми
+                boxEl.addEventListener('mouseenter', () => this.revealGroupUI(group.id, 3500));
+                boxEl.addEventListener('mousemove', () => this.revealGroupUI(group.id, 3500));
+
+                const rootOptions = NOTE_NAMES_LATIN.map((name, i) =>
+                    `<option value="${i}" ${i === group.analysisRoot ? 'selected' : ''}>${name}</option>`
+                ).join('');
+
+                const scaleOptions = Object.keys(HARMONY_SCALES).map(key =>
+                    `<option value="${key}" ${key === group.analysisScale ? 'selected' : ''}>${HARMONY_SCALES[key].name}</option>`
+                ).join('');
+
+                boxEl.innerHTML = `
+                    <div class="group-harmony-selects">
+                        <select class="group-root-select chord-styled-select">${rootOptions}</select>
+                        <select class="group-scale-select chord-styled-select">${scaleOptions}</select>
+                    </div>
+                `;
+
+                const rootSelect = boxEl.querySelector('.group-root-select');
+                const scaleSelect = boxEl.querySelector('.group-scale-select');
+
+                rootSelect.onchange = (e) => {
+                    group.analysisRoot = parseInt(e.target.value);
+                    this.revealGroupUI(group.id, 3500);
+                    this.renderNotes();
+                };
+
+                scaleSelect.onchange = (e) => {
+                    group.analysisScale = e.target.value;
+                    this.revealGroupUI(group.id, 3500);
+                    this.renderNotes();
+                };
+
+                analysisBoxContainer.appendChild(boxEl);
             });
         }
     }
+
+    // --- VELOCITY, ПОДПИСИ И ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ---
 
     getVelocityColor(velocity) {
         const v = Math.max(1, Math.min(127, velocity || 100));
         const ratio = (v - 1) / 126;
 
         let r, g, b;
+
         if (ratio < 0.5) {
             const subRatio = ratio * 2;
             r = Math.round(10 + (160 - 10) * subRatio);
@@ -1790,6 +2254,7 @@ class PianoRoll {
 
         if (btn) {
             btn.classList.remove('active', 'mode-latin', 'mode-ru');
+
             switch (this.noteLabelMode) {
                 case 0:
                     btn.title = 'Подпись нот: Отключена';
@@ -1804,20 +2269,24 @@ class PianoRoll {
                     break;
             }
         }
+
         this.renderNotes();
     }
 
     getNoteLabelText(pitch) {
         if (this.noteLabelMode === 0) return '';
+
         const index = pitch % 12;
 
         if (this.noteLabelMode === 1) {
             const octave = Math.floor(pitch / 12) - 1;
             return `${NOTE_NAMES_LATIN[index]}${octave}`;
         }
+
         if (this.noteLabelMode === 2) {
             return NOTE_NAMES_RU[index];
         }
+
         return '';
     }
 
@@ -1864,11 +2333,12 @@ class PianoRoll {
 
     playChordPreviewByPitches(pitches, duration = '2n') {
         if (!this.synth || !pitches || pitches.length === 0) return;
+
         try {
             const noteNames = pitches.map(p => Tone.Frequency(p, "midi").toNote());
             this.synth.triggerAttackRelease(noteNames, duration);
         } catch (err) {
-            console.warn('Ошибка предпрослушивания:', err);
+            console.warn('Ошибка при предпрослушивании аккорда:', err);
         }
     }
 
@@ -1893,6 +2363,7 @@ class PianoRoll {
 
     showHoverTooltip(note, clientX, clientY) {
         if (!this.tooltipEl) return;
+
         this.tooltipEl.textContent = this.getNoteFullTitle(note.pitch);
         this.tooltipEl.style.left = `${clientX + 12}px`;
         this.tooltipEl.style.top = `${clientY + 12}px`;
@@ -1909,6 +2380,8 @@ class PianoRoll {
             this.tooltipEl.style.display = 'none';
         }
     }
+
+    // --- КОНТЕКСТНОЕ МЕНЮ И ОПЕРАЦИИ БУФЕРА ---
 
     initContextMenu() {
         let menu = document.getElementById('piano-roll-context-menu');
@@ -1950,10 +2423,21 @@ class PianoRoll {
                     color: #666666;
                     cursor: default;
                 }
+                .piano-roll-context-menu .menu-item.disabled:hover {
+                    background: transparent;
+                    color: #666666;
+                }
                 .piano-roll-context-menu .menu-divider {
                     height: 1px;
                     background: #3c3c3c;
                     margin: 4px 0;
+                }
+                .piano-roll-context-menu .menu-badge {
+                    font-size: 10px;
+                    background: #3a3a3a;
+                    padding: 2px 5px;
+                    border-radius: 3px;
+                    color: #888888;
                 }
             `;
             document.head.appendChild(style);
@@ -1972,8 +2456,11 @@ class PianoRoll {
         const createItem = (text, onClick, isDisabled = false, badgeText = null) => {
             const item = document.createElement('div');
             item.className = `menu-item ${isDisabled ? 'disabled' : ''}`;
+
             let html = `<span>${text}</span>`;
-            if (badgeText) html += `<span class="menu-badge">${badgeText}</span>`;
+            if (badgeText) {
+                html += `<span class="menu-badge">${badgeText}</span>`;
+            }
             item.innerHTML = html;
 
             if (!isDisabled) {
@@ -1999,6 +2486,7 @@ class PianoRoll {
             menu.appendChild(createItem(`Скопировать ${noteLabel}`, () => this.copySelectedNotes()));
             menu.appendChild(createItem(`Дублировать ${noteLabel}`, () => this.duplicateSelectedNotes()));
             menu.appendChild(createItem(`В новый голос ${noteLabel}`, () => this.moveSelectedNotesToNewTrack()));
+
             menu.appendChild(createDivider());
 
             const isGrouped = this.areSelectedNotesGrouped();
@@ -2008,13 +2496,18 @@ class PianoRoll {
                 menu.appendChild(createItem(`Сгруппировать`, () => this.groupSelectedNotes()));
             }
 
+            menu.appendChild(createItem(`Динамика...`, () => {}, true, 'Скоро'));
+            menu.appendChild(createItem(`Фигурация...`, () => {}, true, 'Скоро'));
+            menu.appendChild(createItem(`Анализ гармонии`, () => {}, true, 'Скоро'));
+
             menu.appendChild(createDivider());
+
             menu.appendChild(createItem(`Удалить ${noteLabel}`, () => this.deleteSelectedNotes()));
         } else if (mode === 'grid') {
             const hasClipboard = this.clipboard && this.clipboard.length > 0;
             menu.appendChild(createItem(
-                `Вставить ${hasClipboard ? `(${this.clipboard.length})` : ''}`, 
-                () => this.pasteNotes(targetData.slot), 
+                `Вставить ${hasClipboard ? `(${this.clipboard.length})` : ''}`,
+                () => this.pasteNotes(targetData.slot),
                 !hasClipboard
             ));
         }
@@ -2038,6 +2531,7 @@ class PianoRoll {
 
     copySelectedNotes() {
         if (!this.selectedNotes || this.selectedNotes.size === 0) return;
+
         const notesArray = Array.from(this.selectedNotes);
         const minStart = Math.min(...notesArray.map(n => n.start));
 
@@ -2052,8 +2546,8 @@ class PianoRoll {
 
     pasteNotes(targetSlot) {
         if (!this.clipboard || this.clipboard.length === 0) return;
-        this.saveState();
 
+        this.saveState();
         const currentTrack = this.tracks[this.activeTrack] || [];
         this.selectedNotes.clear();
 
@@ -2067,6 +2561,7 @@ class PianoRoll {
             };
             currentTrack.push(newNote);
             this.selectedNotes.add(newNote);
+            this.autoAddNoteToNearbyGroup(newNote);
         });
 
         this.renderNotes();
@@ -2093,6 +2588,7 @@ class PianoRoll {
             };
             currentTrack.push(duplicatedNote);
             newSelection.add(duplicatedNote);
+            this.autoAddNoteToNearbyGroup(duplicatedNote);
         });
 
         this.selectedNotes = newSelection;
@@ -2127,7 +2623,9 @@ class PianoRoll {
 
         if (this.groups && this.groups.length > 0) {
             this.groups.forEach(group => {
-                group.notes = group.notes.map(groupNote => noteMap.get(groupNote) || groupNote);
+                group.notes = group.notes.map(groupNote => {
+                    return noteMap.get(groupNote) || groupNote;
+                });
             });
         }
 
@@ -2140,6 +2638,7 @@ class PianoRoll {
 
     deleteSelectedNotes() {
         if (!this.selectedNotes || this.selectedNotes.size === 0) return;
+
         this.saveState();
         this.selectedNotes.forEach(note => this.removeNoteObject(note));
         this.selectedNotes.clear();
@@ -2156,8 +2655,11 @@ class PianoRoll {
         const createItem = (text, icon, onClick, isDisabled = false, badgeText = null, isDanger = false) => {
             const item = document.createElement('div');
             item.className = `menu-item ${isDisabled ? 'disabled' : ''} ${isDanger ? 'danger' : ''}`;
+
             let html = `<div><span class="menu-item-icon">${icon}</span><span>${text}</span></div>`;
-            if (badgeText) html += `<span class="menu-badge">${badgeText}</span>`;
+            if (badgeText) {
+                html += `<span class="menu-badge">${badgeText}</span>`;
+            }
             item.innerHTML = html;
 
             if (!isDisabled) {
@@ -2177,7 +2679,13 @@ class PianoRoll {
         };
 
         menu.appendChild(createItem('Копировать', '📋', () => this.duplicateTrack(trackId)));
+        menu.appendChild(createItem('Эффекты (EQ, Reverb...)', '🎛️', () => {}, true, 'Скоро'));
+        menu.appendChild(createItem('Тембр', '🎹', () => {}, true, 'Скоро'));
+        menu.appendChild(createItem('VST-плагин', '🔌', () => {}, true, 'Скоро'));
+        menu.appendChild(createItem('MIDI клавиатура', '⌨️', () => {}, true, 'Скоро'));
+
         menu.appendChild(createDivider());
+
         menu.appendChild(createItem('Удалить инструмент', '🗑️', () => this.deleteTrackWithConfirmation(trackId), false, null, true));
 
         menu.style.display = 'block';
@@ -2191,6 +2699,8 @@ class PianoRoll {
         menu.style.top = `${posY}px`;
     }
 
+    // --- ГРУППИРОВКА НОТ ---
+
     groupSelectedNotes() {
         if (!this.selectedNotes || this.selectedNotes.size === 0) return;
 
@@ -2199,14 +2709,15 @@ class PianoRoll {
 
         const newGroup = {
             id: 'group_' + Date.now(),
-            name: `Группа нот #${this.groupCounter}`,
+            name: `Группа нот # ${this.groupCounter}`,
             notes: Array.from(this.selectedNotes),
             color: 0x9B59B6
         };
 
         this.groups.push(newGroup);
         this.selectedNotes.clear();
-        this.saveState(); 
+        this.saveState();
+        this.revealGroupUI(newGroup.id, 3500);
         this.renderNotes();
     }
 
@@ -2214,8 +2725,10 @@ class PianoRoll {
         if (!this.selectedNotes || this.selectedNotes.size === 0) return;
 
         this.saveState();
+
         this.groups = this.groups.filter(group => {
-            return !group.notes.every(n => this.selectedNotes.has(n));
+            const isEntireGroupSelected = group.notes.every(n => this.selectedNotes.has(n));
+            return !isEntireGroupSelected;
         });
 
         this.renderNotes();
@@ -2223,6 +2736,7 @@ class PianoRoll {
 
     renameGroup(group, badgeContainer) {
         this.isMultiDragging = false;
+
         const rect = this.app.view.getBoundingClientRect();
         const globalPos = badgeContainer.getGlobalPosition();
 
@@ -2261,33 +2775,47 @@ class PianoRoll {
         }, 50);
 
         let isFinished = false;
+
         const finishRename = () => {
             if (isFinished) return;
             isFinished = true;
+
             const newName = input.value.trim();
             if (newName && newName !== group.name) {
                 group.name = newName;
-                this.saveState();
+                if (typeof this.saveState === 'function') {
+                    this.saveState();
+                }
             }
+
             cleanup();
+            this.revealGroupUI(group.id, 3000);
             this.renderNotes();
         };
 
         const cleanup = () => {
-            if (input.parentNode) input.parentNode.removeChild(input);
+            if (input.parentNode) {
+                input.parentNode.removeChild(input);
+            }
         };
 
         input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') finishRename();
-            else if (e.key === 'Escape') { isFinished = true; cleanup(); }
+            if (e.key === 'Enter') {
+                finishRename();
+            } else if (e.key === 'Escape') {
+                isFinished = true;
+                cleanup();
+            }
         });
 
-        input.addEventListener('blur', finishRename);
+        input.addEventListener('blur', () => {
+            finishRename();
+        });
     }
 
     areSelectedNotesGrouped() {
         if (!this.selectedNotes || this.selectedNotes.size === 0) return false;
-        return this.groups.some(group => 
+        return this.groups.some(group =>
             group.notes.length === this.selectedNotes.size &&
             group.notes.every(n => this.selectedNotes.has(n))
         );
@@ -2308,6 +2836,7 @@ class PianoRoll {
     duplicateTrack(sourceTrackId) {
         const sourceInst = this.instrumentTypes[sourceTrackId];
         const sourceNotes = this.tracks[sourceTrackId] || [];
+
         if (!sourceInst) return;
 
         this.saveState();
@@ -2315,6 +2844,7 @@ class PianoRoll {
 
         const newId = 'inst_' + Date.now();
         const newName = `${sourceInst.name} (Копия)`;
+
         const defaultColors = [0x9B59B6, 0xE67E22, 0x1ABC9C, 0xE74C3C, 0x34495E, 0xF1C40F, 0x2ECC71];
         const newColor = defaultColors[(this.instrumentCounter - 1) % defaultColors.length];
 
@@ -2327,6 +2857,7 @@ class PianoRoll {
 
         if (this.groups && this.groups.length > 0) {
             const duplicatedGroups = [];
+
             this.groups.forEach(group => {
                 const clonedGroupNotes = group.notes
                     .filter(oldNote => noteMap.has(oldNote))
@@ -2341,6 +2872,7 @@ class PianoRoll {
                     });
                 }
             });
+
             this.groups.push(...duplicatedGroups);
         }
 
@@ -2352,6 +2884,7 @@ class PianoRoll {
         };
 
         this.tracks[newId] = clonedNotes;
+
         this.addInstrumentToUI(newId, newName, newColor);
         this.selectTrack(newId);
     }
@@ -2367,12 +2900,13 @@ class PianoRoll {
         }
 
         const noteCount = (this.tracks[trackId] || []).length;
-        const confirmMessage = noteCount > 0 
+        const confirmMessage = noteCount > 0
             ? `Вы уверены, что хотите удалить "${inst.name}"?\nЭто действие нельзя отменить! В треке содержится нот: ${noteCount}.`
             : `Вы уверены, что хотите удалить "${inst.name}"?`;
 
         if (confirm(confirmMessage)) {
             this.saveState();
+
             delete this.instrumentTypes[trackId];
             delete this.tracks[trackId];
 

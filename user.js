@@ -696,8 +696,13 @@ class UserService {
     }
 
     handleExerciseClick(type) {
-        console.log(`[Exercise] Запущено упражнение: ${type}`);
+		console.log(`[Exercise] Запущено упражнение: ${type}`)
         this.closeModal('studioModal');
+		
+		if (type === 'dictation' && window.dictationManager) {
+            window.dictationManager.openSettingsModal();
+        }
+		
     }
 
     handleGameClick(type) {

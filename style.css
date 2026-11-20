@@ -1335,6 +1335,38 @@ html, body {
     scrollbar-color: #2d3345 #141721 !important;
 }
 
+/* Плавное появление и исчезновение карточки анализа группы */
+.group-harmony-analysis-card {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+}
+
+.group-harmony-analysis-card.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+
+/* Визуальное выделение кнопки/трека "Проверить ответ" в режиме диктанта */
+.inst-item[data-type="dict_answer"] {
+    border-style: dashed;
+    border-color: #2ECC71;
+    background: rgba(46, 204, 113, 0.08);
+}
+
+.inst-item[data-type="dict_answer"]:hover {
+    background: rgba(46, 204, 113, 0.18);
+}
+
+.inst-item[data-type="dict_answer"].active {
+    border-style: solid;
+    background: rgba(46, 204, 113, 0.25);
+}
+
+
+
+
 <!-- CSS Стили меню Cubase -->
 <style>
 .cubase-navbar {

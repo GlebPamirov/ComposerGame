@@ -109,12 +109,20 @@ class ChordManager {
         intervals.forEach(interval => {
             const pitch = rootPitch + interval;
             if (pitch <= maxPitch) {
-                this.editor.tracks[this.editor.activeTrack].push({
+                const newNote = {
                     pitch: pitch,
                     start: startSlot,
                     duration: durationSlots,
-                    dotted: this.editor.hasDotted
-                });
+                    dotted: this.editor.hasDotted,
+                    velocity: 70
+                };
+                this.editor.tracks[this.editor.activeTrack].push(newNote);
+                
+                // Автоматически добавляем ноту в группу, если она рядом или внутри
+                if (typeof this.editor.autoAddNoteToNearbyGroup === 'function') {
+                    this.editor.autoAddNoteToNearbyGroup(newNote);
+                }
+
                 addedPitches.push(pitch);
             }
         });
